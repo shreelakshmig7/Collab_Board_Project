@@ -1,0 +1,14 @@
+{
+  "rules": {
+    "boards": {
+      "$boardId": {
+        "cursors": {
+          "$uid": {
+            ".read": "auth != null",
+            ".write": "auth != null"
+          }
+        }
+      }
+    }
+  }
+}
