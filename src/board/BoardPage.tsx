@@ -55,17 +55,37 @@ export default function BoardPage({ user }: BoardPageProps) {
 
   const setObjectsFromSubscription = useCallback((data: BoardObject[]) => {
     setObjects((prev) => {
-      // Only keep prev when refetch returned empty (e.g. error) so we don't wipe the board
       if (data.length === 0 && prev.length > 0) return prev
-      // Otherwise apply server state so other users' changes (add/update/delete) show up
       return data
     })
   }, [])
 
+  const handleRealtimeObjectChange = useCallback(
+    (change: import('../supabase/objects').RealtimeObjectChange) => {
+      if (change.event === 'DELETE') {
+        setObjects((prev) => prev.filter((o) => o.id !== change.old.id))
+        return
+      }
+      const obj = change.new
+      setObjects((prev) => {
+        const idx = prev.findIndex((o) => o.id === obj.id)
+        if (idx === -1) return [...prev, obj]
+        const next = [...prev]
+        next[idx] = obj
+        return next
+      })
+    },
+    []
+  )
+
   useEffect(() => {
-    const unsub = subscribeObjects(MVP_BOARD_ID, setObjectsFromSubscription)
+    const unsub = subscribeObjects(
+      MVP_BOARD_ID,
+      setObjectsFromSubscription,
+      handleRealtimeObjectChange
+    )
     return unsub
-  }, [setObjectsFromSubscription])
+  }, [setObjectsFromSubscription, handleRealtimeObjectChange])
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

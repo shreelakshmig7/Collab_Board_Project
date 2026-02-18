@@ -1,9 +1,11 @@
-import { memo } from 'react'
+import { memo, useRef } from 'react'
 import { Group, Rect, Text, Circle, Line } from 'react-konva'
 import Konva from 'konva'
 import type { BoardObject } from '../types/board'
 import { DEFAULT_STICKY_COLOR, DEFAULT_SHAPE_COLOR, MVP_BOARD_ID } from '../constants'
 import { updateObject } from '../supabase/objects'
+
+const DRAG_UPDATE_THROTTLE_MS = 40
 
 type BoardObjectsProps = {
   objects: BoardObject[]
@@ -22,6 +24,19 @@ function BoardObjects({
   onStartEditSticky,
   onObjectMoved,
 }: BoardObjectsProps) {
+  const lastDragUpdateRef = useRef<Record<string, number>>({})
+
+  const throttleDragUpdate = (objId: string, x: number, y: number) => {
+    const now = Date.now()
+    if (now - (lastDragUpdateRef.current[objId] ?? 0) >= DRAG_UPDATE_THROTTLE_MS) {
+      lastDragUpdateRef.current[objId] = now
+      onObjectMoved?.(objId, x, y)
+      updateObject(MVP_BOARD_ID, objId, { x, y }).catch((err) =>
+        console.error('Failed to update position during drag', err)
+      )
+    }
+  }
+
   return (
     <>
       {objects.map((obj) => {
@@ -43,6 +58,10 @@ function BoardObjects({
               onTap={(e) => {
                 e.cancelBubble = true
                 onSelect(isSelected ? null : obj.id)
+              }}
+              onDragMove={(e) => {
+                const node = e.target
+                throttleDragUpdate(obj.id, node.x(), node.y())
               }}
               onDragEnd={(e) => {
                 const node = e.target
@@ -100,6 +119,10 @@ function BoardObjects({
                 e.cancelBubble = true
                 onSelect(isSelected ? null : obj.id)
               }}
+              onDragMove={(e) => {
+                const node = e.target
+                throttleDragUpdate(obj.id, node.x(), node.y())
+              }}
               onDragEnd={(e) => {
                 const node = e.target
                 const x = node.x()
@@ -136,6 +159,10 @@ function BoardObjects({
                 e.cancelBubble = true
                 onSelect(isSelected ? null : obj.id)
               }}
+              onDragMove={(e) => {
+                const node = e.target
+                throttleDragUpdate(obj.id, node.x(), node.y())
+              }}
               onDragEnd={(e) => {
                 const node = e.target
                 const x = node.x()
@@ -170,6 +197,10 @@ function BoardObjects({
             onTap={(e) => {
               e.cancelBubble = true
               onSelect(isSelected ? null : obj.id)
+            }}
+            onDragMove={(e) => {
+              const node = e.target
+              throttleDragUpdate(obj.id, node.x(), node.y())
             }}
             onDragEnd={(e) => {
               const node = e.target

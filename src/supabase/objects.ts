@@ -8,11 +8,30 @@ function requireSupabase() {
   return supabase
 }
 
-const REFETCH_DEBOUNCE_MS = 400
+const REFETCH_DEBOUNCE_MS = 2000
+
+export type RealtimeObjectChange =
+  | { event: 'INSERT' | 'UPDATE'; new: BoardObject }
+  | { event: 'DELETE'; old: { id: string } }
+
+function rowToBoardObject(row: Record<string, unknown>): BoardObject {
+  const type = String(row.type)
+  return {
+    id: String(row.id),
+    type: type === 'sticky' || type === 'rect' || type === 'circle' || type === 'line' ? type : 'sticky',
+    x: Number(row.x),
+    y: Number(row.y),
+    width: Number(row.width),
+    height: Number(row.height),
+    text: row.text != null ? String(row.text) : undefined,
+    color: row.color != null ? String(row.color) : undefined,
+  }
+}
 
 export function subscribeObjects(
   boardId: string,
-  callback: (objects: BoardObject[]) => void
+  callback: (objects: BoardObject[]) => void,
+  onRealtimeChange?: (change: RealtimeObjectChange) => void
 ): () => void {
   const db = requireSupabase()
   const fetchAndNotify = async () => {
@@ -29,7 +48,7 @@ export function subscribeObjects(
   fetchAndNotify()
   let refetchTimer: ReturnType<typeof setTimeout> | null = null
   const scheduleRefetch = () => {
-    if (refetchTimer) return
+    if (refetchTimer) clearTimeout(refetchTimer)
     refetchTimer = setTimeout(() => {
       refetchTimer = null
       fetchAndNotify()
@@ -40,7 +59,17 @@ export function subscribeObjects(
     .on(
       'postgres_changes',
       { event: '*', schema: 'public', table: TABLE, filter: `board_id=eq.${boardId}` },
-      scheduleRefetch
+      (payload: { eventType?: string; new?: Record<string, unknown>; old?: Record<string, unknown> }) => {
+        if (onRealtimeChange && payload && typeof payload === 'object') {
+          const ev = (payload.eventType ?? '').toUpperCase()
+          if ((ev === 'INSERT' || ev === 'UPDATE') && payload.new && payload.new.id != null) {
+            onRealtimeChange({ event: ev as 'INSERT' | 'UPDATE', new: rowToBoardObject(payload.new) })
+          } else if (ev === 'DELETE' && payload.old && payload.old.id != null) {
+            onRealtimeChange({ event: 'DELETE', old: { id: String(payload.old.id) } })
+          }
+        }
+        scheduleRefetch()
+      }
     )
     .subscribe((status, err) => {
       if (status !== 'SUBSCRIBED') {
