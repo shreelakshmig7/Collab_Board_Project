@@ -42,7 +42,11 @@ export function subscribeObjects(
       { event: '*', schema: 'public', table: TABLE, filter: `board_id=eq.${boardId}` },
       scheduleRefetch
     )
-    .subscribe()
+    .subscribe((status, err) => {
+      if (status !== 'SUBSCRIBED' && status !== 'OK') {
+        console.warn('[Realtime] board_objects subscription status:', status, err ?? '')
+      }
+    })
   return () => {
     if (refetchTimer) clearTimeout(refetchTimer)
     db.removeChannel(channel)

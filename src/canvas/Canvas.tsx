@@ -153,14 +153,20 @@ export default function Canvas({
   }, [selectedId, objects, onObjectResized])
 
   useEffect(() => {
+    const isTyping = () => {
+      const el = document.activeElement
+      if (!el || !(el instanceof HTMLElement)) return false
+      const tag = el.tagName.toLowerCase()
+      return tag === 'input' || tag === 'textarea' || el.isContentEditable
+    }
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'Space') {
+      if (e.code === 'Space' && !isTyping()) {
         e.preventDefault()
         setSpacePressed(true)
       }
     }
     const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.code === 'Space') {
+      if (e.code === 'Space' && !isTyping()) {
         e.preventDefault()
         setSpacePressed(false)
       }

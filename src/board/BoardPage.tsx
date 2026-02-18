@@ -55,13 +55,10 @@ export default function BoardPage({ user }: BoardPageProps) {
 
   const setObjectsFromSubscription = useCallback((data: BoardObject[]) => {
     setObjects((prev) => {
+      // Only keep prev when refetch returned empty (e.g. error) so we don't wipe the board
       if (data.length === 0 && prev.length > 0) return prev
-      if (prev.length > 0 && data.length < prev.length) return prev
-      if (prev.length === 0) return data
-      const dataById = new Map(data.map((o) => [o.id, o]))
-      const merged = prev.map((p) => dataById.get(p.id) ?? p)
-      const added = data.filter((d) => !prev.some((p) => p.id === d.id))
-      return [...merged, ...added]
+      // Otherwise apply server state so other users' changes (add/update/delete) show up
+      return data
     })
   }, [])
 
@@ -72,6 +69,7 @@ export default function BoardPage({ user }: BoardPageProps) {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (editingId) return
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
         e.preventDefault()
         deleteObject(MVP_BOARD_ID, selectedId)
@@ -80,7 +78,7 @@ export default function BoardPage({ user }: BoardPageProps) {
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [selectedId])
+  }, [selectedId, editingId])
 
   const handleStartEditSticky = useCallback((id: string, text: string) => {
     setEditingId(id)

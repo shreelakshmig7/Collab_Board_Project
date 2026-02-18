@@ -80,7 +80,11 @@ export function subscribeCursors(
       { event: '*', schema: 'public', table: TABLE, filter: `board_id=eq.${boardId}` },
       () => fetchAndNotify()
     )
-    .subscribe()
+    .subscribe((status, err) => {
+      if (status !== 'SUBSCRIBED' && status !== 'OK') {
+        console.warn('[Realtime] cursors subscription status:', status, err ?? '')
+      }
+    })
   return () => {
     db.removeChannel(channel)
   }

@@ -42,6 +42,20 @@ Without this, Google sign-in redirect after login may fail on the deployed app.
 
 Without this, the other user’s cursor won’t appear and their object moves won’t sync.
 
+### If other users’ changes or cursors don’t show until you refresh
+
+1. **Realtime publication**  
+   In Supabase: **Database** → **Replication** → **supabase_realtime**. Ensure **board_objects** and **cursors** are both in the publication (toggled on). Save.
+
+2. **Browser console**  
+   Open DevTools → Console. On load you may see `[Realtime] … subscription status:` if the Realtime channel failed (e.g. `CHANNEL_ERROR`). Fix any errors shown (often missing tables in publication or RLS blocking).
+
+3. **Both users signed in**  
+   Realtime uses the same RLS as the REST API. Both users must be **signed in** (e.g. Google) so they have the `authenticated` role; otherwise they won’t receive postgres_changes.
+
+4. **No ad-blockers / extensions**  
+   Some extensions block WebSockets. Try in an incognito window or another browser.
+
 ## 5. Live URL
 
 After deploy, your app is at the Vercel URL. Add it to the README **Live app** section and to `docs/requirements.md` once the MVP checklist is verified.
