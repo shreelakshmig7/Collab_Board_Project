@@ -81,7 +81,7 @@ export function subscribeCursors(
       () => fetchAndNotify()
     )
     .subscribe((status, err) => {
-      if (status !== 'SUBSCRIBED' && status !== 'OK') {
+      if (status !== 'SUBSCRIBED') {
         console.warn('[Realtime] cursors subscription status:', status, err ?? '')
       }
     })

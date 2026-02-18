@@ -43,7 +43,7 @@ export function subscribeObjects(
       scheduleRefetch
     )
     .subscribe((status, err) => {
-      if (status !== 'SUBSCRIBED' && status !== 'OK') {
+      if (status !== 'SUBSCRIBED') {
         console.warn('[Realtime] board_objects subscription status:', status, err ?? '')
       }
     })
