@@ -40,20 +40,15 @@ export function removePresence(userId: string) {
     .then(({ error }) => error && console.error('removePresence', error))
 }
 
-/** Only treat users as online if seen in the last 2 minutes (filters stale rows from closed tabs). */
-const PRESENCE_STALE_MS = 2 * 60 * 1000
-
-/** Subscribe to the list of online users. Callback receives only recently-seen users; call removePresence on cleanup. */
+/** Subscribe to the list of online users. Callback receives all rows in presence (show on login, remove on logout); call removePresence on cleanup. */
 export function subscribePresence(
   callback: (users: PresenceUser[]) => void
 ): () => void {
   const db = requireSupabase()
   const fetchAndNotify = async () => {
-    const cutoff = new Date(Date.now() - PRESENCE_STALE_MS).toISOString()
     const { data, error } = await db
       .from(TABLE)
       .select('user_id, display_name')
-      .gte('last_seen_at', cutoff)
     if (error) {
       console.error('subscribePresence error', error)
       callback([])

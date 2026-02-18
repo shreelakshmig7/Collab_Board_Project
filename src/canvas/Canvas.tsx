@@ -268,8 +268,10 @@ export default function Canvas({
     target.getClassName() === 'Layer' ||
     (target.name && target.name() === 'canvas-background')
 
+  const isPanMode = spacePressed || activeTool === 'pan'
+
   const handleStageMouseDown = (e: Konva.KonvaEventObject<MouseEvent>) => {
-    if (!spacePressed || !isBackgroundTarget(e.target)) return
+    if (!isPanMode || !isBackgroundTarget(e.target)) return
     const stage = e.target.getStage()
     if (!stage) return
     const pointer = stage.getPointerPosition()
@@ -382,7 +384,6 @@ export default function Canvas({
     // Creation is single-click only; double-click does nothing for creation
   }
 
-  const isPan = spacePressed
   const cursorList = Object.values(otherCursors)
 
   const showInlineEdit = editingObject && onEditingTextChange && onSaveEdit
@@ -414,7 +415,7 @@ export default function Canvas({
         scaleX={stageScale}
         scaleY={stageScale}
         onWheel={handleWheel}
-        style={{ cursor: isPan ? (isPanning ? 'grabbing' : 'grab') : 'default' }}
+        style={{ cursor: isPanMode ? (isPanning ? 'grabbing' : 'grab') : 'default' }}
       >
         <Layer>
           <Rect
