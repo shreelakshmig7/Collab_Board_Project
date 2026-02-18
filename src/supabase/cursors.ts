@@ -45,6 +45,15 @@ export function removeMyCursor(boardId: string, uid: string) {
     .then(({ error }) => error && console.error('removeMyCursor', error))
 }
 
+/** Delete all cursors for a board (e.g. when deleting the board). */
+export async function deleteCursorsForBoard(boardId: string): Promise<void> {
+  const { error } = await requireSupabase()
+    .from(TABLE)
+    .delete()
+    .eq('board_id', boardId)
+  if (error) throw error
+}
+
 export function subscribeCursors(
   boardId: string,
   callback: (cursors: Record<string, CursorPayload & { uid: string }>) => void

@@ -409,10 +409,6 @@ export default function Canvas({
         }}
         onMouseUp={handleStageMouseUp}
         onMouseLeave={handleStageMouseUp}
-        onClick={handleStageClick}
-        onTap={handleStageClick}
-        onDblClick={handleStageDoubleClick}
-        onDblTap={handleStageDoubleClick}
         x={stagePos.x}
         y={stagePos.y}
         scaleX={stageScale}

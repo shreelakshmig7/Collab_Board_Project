@@ -64,3 +64,12 @@ export async function getBoard(boardId: string): Promise<Board | null> {
     created_at: String(data.created_at),
   }
 }
+
+/** Delete a board. Caller should delete board_objects and cursors for this board first. */
+export async function deleteBoard(boardId: string): Promise<void> {
+  const { error } = await requireSupabase()
+    .from(TABLE)
+    .delete()
+    .eq('id', boardId)
+  if (error) throw error
+}

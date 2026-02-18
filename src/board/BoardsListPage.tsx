@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { AppUser } from '../types/user'
-import { listBoards, createBoard } from '../supabase/boards'
+import { listBoards, createBoard, deleteBoard } from '../supabase/boards'
 import type { Board } from '../supabase/boards'
 import { signOut } from '../supabase/auth'
+import { deleteAllObjects } from '../supabase/objects'
+import { deleteCursorsForBoard } from '../supabase/cursors'
 import TopBar from './TopBar'
 
 type BoardsListPageProps = { user: AppUser; presenceNames: string[] }
@@ -15,6 +17,9 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
   const [error, setError] = useState<string | null>(null)
   const [showNewBoardForm, setShowNewBoardForm] = useState(false)
   const [newBoardName, setNewBoardName] = useState('')
+  const [selectedBoardId, setSelectedBoardId] = useState<string | null>(null)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -57,6 +62,26 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
     navigate(`/board/${id}`)
   }
 
+  const selectedBoard = selectedBoardId ? boards.find((b) => b.id === selectedBoardId) : null
+
+  const handleDeleteBoard = async () => {
+    if (!selectedBoardId || !selectedBoard) return
+    setError(null)
+    setDeleting(true)
+    try {
+      await deleteAllObjects(selectedBoardId)
+      await deleteCursorsForBoard(selectedBoardId)
+      await deleteBoard(selectedBoardId)
+      setBoards((prev) => prev.filter((b) => b.id !== selectedBoardId))
+      setSelectedBoardId(null)
+      setShowDeleteConfirm(false)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -76,13 +101,24 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
           </div>
         )}
         {!showNewBoardForm ? (
-          <button
-            type="button"
-            onClick={() => setShowNewBoardForm(true)}
-            className="mb-8 flex items-center justify-center gap-2 px-6 py-3 rounded-xl border-2 border-dashed border-gray-300 text-gray-600 font-medium hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50/50 transition-colors"
-          >
-            + New Board
-          </button>
+          <div className="mb-8 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setShowNewBoardForm(true)}
+              className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl border-2 border-dashed border-gray-300 text-gray-600 font-medium hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50/50 transition-colors"
+            >
+              + New Board
+            </button>
+            <button
+              type="button"
+              onClick={() => selectedBoardId && setShowDeleteConfirm(true)}
+              disabled={!selectedBoardId || (selectedBoard?.user_id !== user.uid)}
+              title={selectedBoardId && selectedBoard?.user_id !== user.uid ? 'You can only delete boards you created' : undefined}
+              className="px-6 py-3 rounded-xl border border-gray-200 bg-white text-gray-700 font-medium hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Delete board
+            </button>
+          </div>
         ) : (
           <form onSubmit={handleCreateBoard} className="mb-8 flex flex-wrap items-end gap-3">
             <div className="flex-1 min-w-[200px]">
@@ -122,19 +158,70 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
           <ul className="space-y-2">
             {boards.map((board) => (
               <li key={board.id}>
-                <button
-                  type="button"
-                  onClick={() => handleOpenBoard(board.id)}
-                  className="w-full text-left px-5 py-4 rounded-xl bg-white border border-gray-200 shadow-sm hover:border-blue-200 hover:shadow transition-all"
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setSelectedBoardId(board.id)}
+                  onKeyDown={(e) => e.key === 'Enter' && setSelectedBoardId(board.id)}
+                  className={`w-full text-left px-5 py-4 rounded-xl border shadow-sm transition-all cursor-pointer ${
+                    selectedBoardId === board.id
+                      ? 'bg-blue-50 border-blue-300 ring-2 ring-blue-200'
+                      : 'bg-white border-gray-200 hover:border-blue-200 hover:shadow'
+                  }`}
                 >
                   <span className="font-medium text-gray-800">{board.name}</span>
                   <span className="block text-xs text-gray-500 mt-1">
                     Created {new Date(board.created_at).toLocaleDateString()}
                   </span>
-                </button>
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); handleOpenBoard(board.id); }}
+                      className="px-3 py-1.5 text-sm font-medium text-blue-600 hover:bg-blue-100 rounded-lg"
+                    >
+                      Open
+                    </button>
+                  </div>
+                </div>
               </li>
             ))}
           </ul>
+        )}
+
+        {showDeleteConfirm && selectedBoard && (
+          <div
+            className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-board-title"
+          >
+            <div className="bg-white rounded-2xl shadow-xl p-6 max-w-sm w-full mx-4">
+              <h2 id="delete-board-title" className="text-lg font-semibold text-gray-800 mb-2">
+                Delete board?
+              </h2>
+              <p className="text-gray-600 text-sm mb-6">
+                Are you sure you want to delete &quot;{selectedBoard.name}&quot;? All sticky notes and shapes on this board will be permanently removed. This cannot be undone.
+              </p>
+              <div className="flex gap-3 justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowDeleteConfirm(false)}
+                  disabled={deleting}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-xl hover:bg-gray-200 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeleteBoard}
+                  disabled={deleting}
+                  className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-xl hover:bg-red-700 disabled:opacity-50"
+                >
+                  {deleting ? 'Deleting…' : 'Delete'}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </main>
     </div>
