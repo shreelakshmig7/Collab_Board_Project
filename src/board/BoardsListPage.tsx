@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { AppUser } from '../types/user'
-import { listBoards, createBoard, deleteBoard } from '../supabase/boards'
+import { listBoards, createBoard, deleteBoard, updateBoard } from '../supabase/boards'
 import type { Board } from '../supabase/boards'
 import { signOut } from '../supabase/auth'
 import { deleteAllObjects } from '../supabase/objects'
@@ -20,6 +20,9 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
   const [selectedBoardId, setSelectedBoardId] = useState<string | null>(null)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [showRenameModal, setShowRenameModal] = useState(false)
+  const [renameValue, setRenameValue] = useState('')
+  const [renaming, setRenaming] = useState(false)
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -82,6 +85,32 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
     }
   }
 
+  const handleRenameBoard = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const name = renameValue.trim()
+    if (!name || !selectedBoardId || !selectedBoard) return
+    if (selectedBoard.user_id !== user.uid) return
+    setError(null)
+    setRenaming(true)
+    try {
+      await updateBoard(selectedBoardId, { name })
+      setBoards((prev) => prev.map((b) => (b.id === selectedBoardId ? { ...b, name } : b)))
+      setShowRenameModal(false)
+      setRenameValue('')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setRenaming(false)
+    }
+  }
+
+  const openRenameModal = () => {
+    if (selectedBoard && selectedBoard.user_id === user.uid) {
+      setRenameValue(selectedBoard.name)
+      setShowRenameModal(true)
+    }
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -117,6 +146,15 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
               className="px-6 py-3 rounded-xl border border-gray-200 bg-white text-gray-700 font-medium hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Delete board
+            </button>
+            <button
+              type="button"
+              onClick={openRenameModal}
+              disabled={!selectedBoardId || (selectedBoard?.user_id !== user.uid)}
+              title={selectedBoardId && selectedBoard?.user_id !== user.uid ? 'You can only rename boards you created' : undefined}
+              className="px-6 py-3 rounded-xl border border-gray-200 bg-white text-gray-700 font-medium hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Rename board
             </button>
           </div>
         ) : (
@@ -220,6 +258,49 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
                   {deleting ? 'Deleting…' : 'Delete'}
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {showRenameModal && selectedBoard && selectedBoard.user_id === user.uid && (
+          <div
+            className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="rename-board-title"
+          >
+            <div className="bg-white rounded-2xl shadow-xl p-6 max-w-sm w-full mx-4">
+              <h2 id="rename-board-title" className="text-lg font-semibold text-gray-800 mb-2">
+                Rename board
+              </h2>
+              <form onSubmit={handleRenameBoard} className="space-y-4">
+                <input
+                  type="text"
+                  value={renameValue}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  placeholder="Board name"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  autoFocus
+                  disabled={renaming}
+                />
+                <div className="flex gap-3 justify-end">
+                  <button
+                    type="button"
+                    onClick={() => { setShowRenameModal(false); setRenameValue(''); }}
+                    disabled={renaming}
+                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-xl hover:bg-gray-200 disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={renaming || !renameValue.trim()}
+                    className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-xl hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {renaming ? 'Saving…' : 'Save'}
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         )}

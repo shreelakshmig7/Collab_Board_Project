@@ -471,7 +471,11 @@ export default function Canvas({
               boxSizing: 'border-box',
               background: editingObject?.color ?? 'rgba(255,255,255,0.95)',
               border: '2px solid #2563eb',
-              borderRadius: 8,
+              borderRadius: editingObject?.type === 'circle' ? '50%' : 8,
+              overflow: 'hidden',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
             }}
           >
             <textarea
@@ -489,14 +493,16 @@ export default function Canvas({
                 }
               }}
               style={{
-                width: '100%',
-                height: '100%',
+                width: editingObject?.type === 'circle' ? '85%' : '100%',
+                height: editingObject?.type === 'circle' ? '85%' : '100%',
                 resize: 'none',
                 border: 'none',
                 outline: 'none',
                 fontSize: Math.max(12, Math.min(20, (editingObject?.width ?? 100) * stageScale * 0.12)),
                 fontFamily: 'inherit',
                 lineHeight: 1.4,
+                textAlign: editingObject?.type === 'circle' ? 'center' : 'left',
+                borderRadius: editingObject?.type === 'circle' ? '50%' : undefined,
               }}
               autoFocus
             />

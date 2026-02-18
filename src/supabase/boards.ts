@@ -65,6 +65,18 @@ export async function getBoard(boardId: string): Promise<Board | null> {
   }
 }
 
+/** Update a board (e.g. rename). Only the owner can update. */
+export async function updateBoard(boardId: string, updates: { name?: string }): Promise<void> {
+  const row: Record<string, unknown> = {}
+  if (updates.name !== undefined) row.name = updates.name
+  if (Object.keys(row).length === 0) return
+  const { error } = await requireSupabase()
+    .from(TABLE)
+    .update(row)
+    .eq('id', boardId)
+  if (error) throw error
+}
+
 /** Delete a board. Caller should delete board_objects and cursors for this board first. */
 export async function deleteBoard(boardId: string): Promise<void> {
   const { error } = await requireSupabase()

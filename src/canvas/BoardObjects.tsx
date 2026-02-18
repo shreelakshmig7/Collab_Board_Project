@@ -114,6 +114,11 @@ function BoardObjects({
         if (obj.type === 'circle') {
           const color = obj.color ?? DEFAULT_SHAPE_COLOR
           const radius = obj.width / 2
+          const clipPath = (): [Path2D] => {
+            const p = new Path2D()
+            p.arc(radius, radius, radius, 0, Math.PI * 2)
+            return [p]
+          }
           return (
             <Group
               key={obj.id}
@@ -121,6 +126,7 @@ function BoardObjects({
               x={obj.x}
               y={obj.y}
               draggable
+              clipFunc={clipPath}
               onClick={(e) => {
                 e.cancelBubble = true
                 onSelect(isSelected ? null : obj.id)
