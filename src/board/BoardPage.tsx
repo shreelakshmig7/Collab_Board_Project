@@ -6,7 +6,7 @@ import Toolbar from './Toolbar'
 import type { Tool } from './Toolbar'
 import Canvas from '../canvas/Canvas'
 import { subscribeObjects, updateObject, deleteObject, deleteAllObjects } from '../supabase/objects'
-import { removeMyCursor } from '../supabase/cursors'
+import { removeAllCursorsForUser } from '../supabase/cursors'
 import { signOut } from '../supabase/auth'
 import type { BoardObject } from '../types/board'
 import { runAICommand } from '../ai/claudeAgent'
@@ -105,6 +105,10 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
   )
 
   useEffect(() => {
+    setSelectedId(null)
+  }, [boardId])
+
+  useEffect(() => {
     const unsub = subscribeObjects(
       boardId,
       setObjectsFromSubscription,
@@ -195,9 +199,9 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
   )
 
   const handleSignOut = useCallback(() => {
-    removeMyCursor(boardId, user.uid)
+    removeAllCursorsForUser(user.uid)
     signOut()
-  }, [boardId, user.uid])
+  }, [user.uid])
 
   const handleClearBoard = useCallback(() => {
     deleteAllObjects(boardId).then(() => setObjects([])).catch((err) =>

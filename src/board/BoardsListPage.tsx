@@ -5,7 +5,7 @@ import { listBoards, createBoard, deleteBoard, updateBoard } from '../supabase/b
 import type { Board } from '../supabase/boards'
 import { signOut } from '../supabase/auth'
 import { deleteAllObjects } from '../supabase/objects'
-import { deleteCursorsForBoard, getBoardPresenceCount } from '../supabase/cursors'
+import { deleteCursorsForBoard, getBoardPresenceCount, removeAllCursorsForUser } from '../supabase/cursors'
 import TopBar from './TopBar'
 
 type BoardsListPageProps = { user: AppUser; presenceNames: string[] }
@@ -137,7 +137,7 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
-      <TopBar presenceNames={presenceNames} onSignOut={() => signOut()} />
+      <TopBar presenceNames={presenceNames} onSignOut={() => { removeAllCursorsForUser(user.uid); signOut() }} />
       <main className="max-w-2xl mx-auto px-6 py-12 flex-1 w-full">
         <h1 className="text-2xl font-semibold text-gray-800 mb-8">My Boards</h1>
         {error && (

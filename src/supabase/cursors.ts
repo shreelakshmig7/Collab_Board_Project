@@ -45,6 +45,15 @@ export function removeMyCursor(boardId: string, uid: string) {
     .then(({ error }) => error && console.error('removeMyCursor', error))
 }
 
+/** Remove all cursor rows for a user (call on logout so their cursor disappears everywhere). */
+export function removeAllCursorsForUser(uid: string) {
+  requireSupabase()
+    .from(TABLE)
+    .delete()
+    .eq('user_id', uid)
+    .then(({ error }) => error && console.error('removeAllCursorsForUser', error))
+}
+
 /** Delete all cursors for a board (e.g. when deleting the board). */
 export async function deleteCursorsForBoard(boardId: string): Promise<void> {
   const { error } = await requireSupabase()
