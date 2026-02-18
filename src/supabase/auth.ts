@@ -17,6 +17,24 @@ export function signInWithGoogle() {
   })
 }
 
+export function signUpWithEmail(email: string, password: string) {
+  if (!supabase) {
+    return Promise.reject(
+      new Error('Supabase not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to .env')
+    )
+  }
+  return supabase.auth.signUp({ email, password })
+}
+
+export function signInWithEmail(email: string, password: string) {
+  if (!supabase) {
+    return Promise.reject(
+      new Error('Supabase not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to .env')
+    )
+  }
+  return supabase.auth.signInWithPassword({ email, password })
+}
+
 export function signOut() {
   if (!supabase) return Promise.resolve()
   return supabase.auth.signOut()

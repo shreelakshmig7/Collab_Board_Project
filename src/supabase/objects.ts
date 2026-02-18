@@ -135,3 +135,12 @@ export async function deleteObject(boardId: string, id: string): Promise<void> {
     .eq('id', id)
   if (error) throw error
 }
+
+/** Delete all objects on a board (clear board). */
+export async function deleteAllObjects(boardId: string): Promise<void> {
+  const { error } = await requireSupabase()
+    .from(TABLE)
+    .delete()
+    .eq('board_id', boardId)
+  if (error) throw error
+}

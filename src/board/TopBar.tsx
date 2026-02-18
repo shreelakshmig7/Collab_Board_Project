@@ -1,67 +1,95 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { signOut } from '../supabase/auth'
-
-/** Gemini-style star/sparkle icon (inline SVG) */
-function GeminiIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      className={className}
-      fill="currentColor"
-      aria-hidden
-    >
-      <path d="M12 2L14.5 8.5L21 9L16 13.5L17.5 20L12 17L6.5 20L8 13.5L3 9L9.5 8.5L12 2Z" />
-    </svg>
-  )
-}
 
 type TopBarProps = {
   presenceNames: string[]
   onSignOut?: () => void
+  boardTitle?: string
+  onBackToBoards?: () => void
+  onClearBoard?: () => void
 }
 
-export default function TopBar({ presenceNames, onSignOut }: TopBarProps) {
-  const [showComingSoon, setShowComingSoon] = useState(false)
+export default function TopBar({ presenceNames, onSignOut, boardTitle, onBackToBoards, onClearBoard }: TopBarProps) {
+  const [showPresenceDropdown, setShowPresenceDropdown] = useState(false)
+  const [showClearModal, setShowClearModal] = useState(false)
+  const presenceRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (!showComingSoon) return
-    const t = setTimeout(() => setShowComingSoon(false), 2500)
-    return () => clearTimeout(t)
-  }, [showComingSoon])
+    if (!showPresenceDropdown) return
+    const handleClickOutside = (e: MouseEvent) => {
+      if (presenceRef.current && !presenceRef.current.contains(e.target as Node)) {
+        setShowPresenceDropdown(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [showPresenceDropdown])
+
+  const count = presenceNames.length
+  const label = `Online (${count})`
+
+  const handleClearConfirm = () => {
+    onClearBoard?.()
+    setShowClearModal(false)
+  }
 
   return (
-    <header className="flex items-center justify-between px-5 py-3 bg-white/95 backdrop-blur-sm border-b border-gray-200/80 shadow-sm">
-      <span className="font-semibold text-xl text-gray-800 tracking-tight">CollabBoard</span>
-      <div className="flex items-center gap-5">
-        <div className="relative">
+    <>
+      <header className="flex items-center justify-between px-5 py-3 bg-white/95 backdrop-blur-sm border-b border-gray-200/80 shadow-sm">
+        <div className="flex items-center gap-3">
+          {onBackToBoards && (
+            <button
+              type="button"
+              onClick={onBackToBoards}
+              className="text-sm text-gray-600 hover:text-gray-800 font-medium"
+            >
+              ← Boards
+            </button>
+          )}
+          <span className="font-semibold text-xl text-gray-800 tracking-tight">
+            {boardTitle ?? 'CollabBoard'}
+          </span>
+        </div>
+        <div className="flex items-center gap-5">
+          {onClearBoard && (
+            <button
+              type="button"
+              onClick={() => setShowClearModal(true)}
+              className="px-4 py-2 text-sm font-medium rounded-xl border border-gray-200 bg-gray-100 text-gray-700 hover:bg-gray-200 transition-all"
+            >
+              Clear board
+            </button>
+          )}
+        <div className="relative flex items-center gap-2" ref={presenceRef}>
+          <span className="w-2.5 h-2.5 rounded-full bg-green-500 shrink-0" aria-hidden />
           <button
             type="button"
-            onClick={() => setShowComingSoon(true)}
-            className="flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-br from-violet-100 to-indigo-100 text-violet-600 hover:from-violet-200 hover:to-indigo-200 active:scale-95 transition-all duration-200 shadow-sm border border-violet-200/60"
-            title="AI (coming soon)"
-            aria-label="AI – coming soon"
+            onClick={() => setShowPresenceDropdown((v) => !v)}
+            className="text-sm text-gray-500 font-medium hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100"
           >
-            <GeminiIcon className="w-5 h-5" />
+            {label}
           </button>
-          {showComingSoon && (
+          {showPresenceDropdown && (
             <div
-              role="tooltip"
-              className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 px-4 py-2.5 bg-gray-900 text-white text-sm font-medium rounded-2xl shadow-lg whitespace-nowrap z-50"
-              style={{
-                boxShadow: '0 10px 40px -10px rgba(0,0,0,0.25)',
-              }}
+              className="absolute right-0 top-full mt-1 py-2 min-w-[160px] bg-white border border-gray-200 rounded-xl shadow-lg z-50"
+              role="listbox"
             >
-              Coming soon!!
-              <span
-                className="absolute left-1/2 -translate-x-1/2 top-full border-8 border-transparent border-t-gray-900"
-                style={{ marginTop: '-1px' }}
-              />
+              {count === 0 ? (
+                <div className="px-4 py-2 text-sm text-gray-500">No one else online</div>
+              ) : (
+                presenceNames.map((name) => (
+                  <div
+                    key={name}
+                    className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                    role="option"
+                  >
+                    {name}
+                  </div>
+                ))
+              )}
             </div>
           )}
         </div>
-        <span className="text-sm text-gray-500 font-medium">
-          {presenceNames.length ? presenceNames.join(', ') + ' online' : 'You online'}
-        </span>
         <button
           type="button"
           onClick={() => (onSignOut ? onSignOut() : signOut())}
@@ -71,5 +99,40 @@ export default function TopBar({ presenceNames, onSignOut }: TopBarProps) {
         </button>
       </div>
     </header>
+
+      {showClearModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="clear-modal-title"
+        >
+          <div className="bg-white rounded-2xl shadow-xl p-6 max-w-sm w-full mx-4">
+            <h2 id="clear-modal-title" className="text-lg font-semibold text-gray-800 mb-2">
+              Clear board?
+            </h2>
+            <p className="text-gray-600 text-sm mb-6">
+              Are you sure you want to delete all sticky notes and shapes on this board? This cannot be undone.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                type="button"
+                onClick={() => setShowClearModal(false)}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-xl hover:bg-gray-200"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleClearConfirm}
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-xl hover:bg-red-700"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   )
 }

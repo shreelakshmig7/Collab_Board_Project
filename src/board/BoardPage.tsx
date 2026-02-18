@@ -1,19 +1,29 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import type { AppUser } from '../types/user'
 import TopBar from './TopBar'
 import Toolbar from './Toolbar'
 import type { Tool } from './Toolbar'
 import Canvas from '../canvas/Canvas'
-import { subscribeObjects, updateObject, deleteObject } from '../supabase/objects'
+import { subscribeObjects, updateObject, deleteObject, deleteAllObjects } from '../supabase/objects'
 import { removeMyCursor } from '../supabase/cursors'
 import { signOut } from '../supabase/auth'
-import { MVP_BOARD_ID } from '../constants'
 import type { BoardObject } from '../types/board'
 import { runAICommand } from '../ai/claudeAgent'
 
-type BoardPageProps = { user: AppUser }
+/** Gemini-style star/sparkle icon (inline SVG) */
+function GeminiIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden>
+      <path d="M12 2L14.5 8.5L21 9L16 13.5L17.5 20L12 17L6.5 20L8 13.5L3 9L9.5 8.5L12 2Z" />
+    </svg>
+  )
+}
 
-export default function BoardPage({ user }: BoardPageProps) {
+type BoardPageProps = { user: AppUser; boardId: string; boardName: string }
+
+export default function BoardPage({ user, boardId, boardName }: BoardPageProps) {
+  const navigate = useNavigate()
   const [activeTool, setActiveTool] = useState<Tool>('sticky')
   const [presenceNames, setPresenceNames] = useState<string[]>([])
   const [objects, setObjects] = useState<BoardObject[]>([])
@@ -26,6 +36,7 @@ export default function BoardPage({ user }: BoardPageProps) {
   const [aiLoading, setAiLoading] = useState(false)
   const [aiError, setAiError] = useState<string | null>(null)
   const [createError, setCreateError] = useState<string | null>(null)
+  const [showComingSoon, setShowComingSoon] = useState(false)
 
   const handleOptimisticAdd = useCallback((obj: BoardObject) => {
     setObjects((prev) => [...prev, obj])
@@ -49,11 +60,11 @@ export default function BoardPage({ user }: BoardPageProps) {
       setObjects((prev) =>
         prev.map((o) => (o.id === id ? { ...o, x, y, width, height } : o))
       )
-      updateObject(MVP_BOARD_ID, id, { x, y, width, height }).catch((err) =>
+      updateObject(boardId, id, { x, y, width, height }).catch((err) =>
         console.error('Failed to update object size', err)
       )
     },
-    []
+    [boardId]
   )
 
   const setObjectsFromSubscription = useCallback((data: BoardObject[]) => {
@@ -96,25 +107,25 @@ export default function BoardPage({ user }: BoardPageProps) {
 
   useEffect(() => {
     const unsub = subscribeObjects(
-      MVP_BOARD_ID,
+      boardId,
       setObjectsFromSubscription,
       handleRealtimeObjectChange
     )
     return unsub
-  }, [setObjectsFromSubscription, handleRealtimeObjectChange])
+  }, [boardId, setObjectsFromSubscription, handleRealtimeObjectChange])
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (editingId) return
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
         e.preventDefault()
-        deleteObject(MVP_BOARD_ID, selectedId)
+        deleteObject(boardId, selectedId)
         setSelectedId(null)
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [selectedId, editingId])
+  }, [boardId, selectedId, editingId])
 
   const handleStartEditText = useCallback((id: string, text: string) => {
     setEditingId(id)
@@ -133,11 +144,11 @@ export default function BoardPage({ user }: BoardPageProps) {
     setEditingId(null)
     setEditingText('')
     setObjects((prev) => prev.map((o) => (o.id === id ? { ...o, text: newText } : o)))
-    updateObject(MVP_BOARD_ID, id, { text: newText }).catch((err) => {
+    updateObject(boardId, id, { text: newText }).catch((err) => {
       console.error('Failed to save sticky text', err)
       setObjects((prev) => prev.map((o) => (o.id === id ? { ...o, text: previousText } : o)))
     })
-  }, [editingId, editingText, objects])
+  }, [boardId, editingId, editingText, objects])
 
   const handleCancelEdit = useCallback(() => {
     setEditingId(null)
@@ -162,11 +173,11 @@ export default function BoardPage({ user }: BoardPageProps) {
       setObjects((prev) =>
         prev.map((o) => (o.id === selectedColorableId ? { ...o, color } : o))
       )
-      updateObject(MVP_BOARD_ID, selectedColorableId, { color }).catch((err) =>
+      updateObject(boardId, selectedColorableId, { color }).catch((err) =>
         console.error('Failed to update color', err)
       )
     },
-    [selectedColorableId]
+    [boardId, selectedColorableId]
   )
 
   const handleResize = useCallback(
@@ -177,17 +188,33 @@ export default function BoardPage({ user }: BoardPageProps) {
           o.id === selectedId ? { ...o, width, height } : o
         )
       )
-      updateObject(MVP_BOARD_ID, selectedId, { width, height }).catch((err) =>
+      updateObject(boardId, selectedId, { width, height }).catch((err) =>
         console.error('Failed to resize', err)
       )
     },
-    [selectedId]
+    [boardId, selectedId]
   )
 
   const handleSignOut = useCallback(() => {
-    removeMyCursor(MVP_BOARD_ID, user.uid)
+    removeMyCursor(boardId, user.uid)
     signOut()
-  }, [user.uid])
+  }, [boardId, user.uid])
+
+  const handleClearBoard = useCallback(() => {
+    deleteAllObjects(boardId).then(() => setObjects([])).catch((err) =>
+      console.error('Failed to clear board', err)
+    )
+  }, [boardId])
+
+  const handleBackToBoards = useCallback(() => {
+    navigate('/')
+  }, [navigate])
+
+  useEffect(() => {
+    if (!showComingSoon) return
+    const t = setTimeout(() => setShowComingSoon(false), 2500)
+    return () => clearTimeout(t)
+  }, [showComingSoon])
 
   const handleRunAI = useCallback(async () => {
     const prompt = aiPrompt.trim()
@@ -196,7 +223,7 @@ export default function BoardPage({ user }: BoardPageProps) {
     setAiResult(null)
     setAiError(null)
     try {
-      const result = await runAICommand(prompt, objects)
+      const result = await runAICommand(prompt, objects, boardId)
       setAiResult(result.text)
       if (result.error) setAiError(result.error)
     } catch (err) {
@@ -211,6 +238,9 @@ export default function BoardPage({ user }: BoardPageProps) {
       <TopBar
         presenceNames={presenceNames}
         onSignOut={handleSignOut}
+        boardTitle={boardName}
+        onBackToBoards={handleBackToBoards}
+        onClearBoard={handleClearBoard}
       />
       <Toolbar
         activeTool={activeTool}
@@ -228,6 +258,7 @@ export default function BoardPage({ user }: BoardPageProps) {
       )}
       <div className="flex-1 min-h-0">
         <Canvas
+          boardId={boardId}
           user={user}
           activeTool={activeTool}
           onPresenceChange={setPresenceNames}
@@ -244,8 +275,32 @@ export default function BoardPage({ user }: BoardPageProps) {
           onAddFailed={handleAddFailed}
           onObjectMoved={handleObjectMoved}
           onObjectResized={handleObjectResized}
+          onAfterCreateObject={() => setActiveTool('pan')}
         />
       </div>
+      {/* AI button fixed bottom-right */}
+      <div className="fixed right-6 bottom-6 z-40">
+        <button
+          type="button"
+          onClick={() => setShowComingSoon(true)}
+          className="flex items-center justify-center w-12 h-12 rounded-xl bg-gradient-to-br from-violet-100 to-indigo-100 text-violet-600 hover:from-violet-200 hover:to-indigo-200 active:scale-95 transition-all duration-200 shadow-lg border border-violet-200/60"
+          title="AI (coming soon)"
+          aria-label="AI – coming soon"
+        >
+          <GeminiIcon className="w-6 h-6" />
+        </button>
+        {showComingSoon && (
+          <div
+            role="tooltip"
+            className="absolute right-0 bottom-full mb-2 px-4 py-2.5 bg-gray-900 text-white text-sm font-medium rounded-2xl shadow-lg whitespace-nowrap"
+            style={{ boxShadow: '0 10px 40px -10px rgba(0,0,0,0.25)' }}
+          >
+            Coming soon!!
+            <span className="absolute right-6 top-full border-8 border-transparent border-t-gray-900" style={{ marginTop: '-1px' }} />
+          </div>
+        )}
+      </div>
+
       {showAIPanel && (
         <div className="px-4 py-3 bg-violet-50 border-b border-violet-200 flex flex-wrap items-center gap-3">
           <input

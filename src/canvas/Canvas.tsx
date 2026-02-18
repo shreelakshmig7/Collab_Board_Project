@@ -4,7 +4,6 @@ import Konva from 'konva'
 import type { AppUser } from '../types/user'
 import type { Tool } from '../board/Toolbar'
 import {
-  MVP_BOARD_ID,
   STICKY_WIDTH,
   STICKY_HEIGHT,
   DEFAULT_STICKY_COLOR,
@@ -26,6 +25,7 @@ import OtherCursors from './OtherCursors'
 import BoardObjects from './BoardObjects'
 
 type CanvasProps = {
+  boardId: string
   user: AppUser
   activeTool: Tool
   onPresenceChange: (names: string[]) => void
@@ -42,9 +42,11 @@ type CanvasProps = {
   onAddFailed?: (id: string, err: unknown) => void
   onObjectMoved?: (id: string, x: number, y: number) => void
   onObjectResized?: (id: string, payload: { x: number; y: number; width: number; height: number }) => void
+  onAfterCreateObject?: () => void
 }
 
 export default function Canvas({
+  boardId,
   user,
   activeTool,
   onPresenceChange,
@@ -61,6 +63,7 @@ export default function Canvas({
   onAddFailed,
   onObjectMoved,
   onObjectResized,
+  onAfterCreateObject,
 }: CanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const stageRef = useRef<Konva.Stage>(null)
@@ -80,7 +83,7 @@ export default function Canvas({
   useEffect(() => {
     let lastCursorUpdate = 0
     const CURSOR_THROTTLE_MS = 120
-    const unsub = subscribeCursors(MVP_BOARD_ID, (cursors) => {
+    const unsub = subscribeCursors(boardId, (cursors) => {
       const now = Date.now()
       if (now - lastCursorUpdate < CURSOR_THROTTLE_MS) return
       lastCursorUpdate = now
@@ -94,13 +97,13 @@ export default function Canvas({
       onPresenceChange(names.length ? names : ['You'])
     })
     return unsub
-  }, [user?.uid, onPresenceChange])
+  }, [boardId, user?.uid, onPresenceChange])
 
   useEffect(() => {
     if (!user) return
-    setupCursorOnDisconnect(MVP_BOARD_ID, user.uid)
+    setupCursorOnDisconnect(boardId, user.uid)
     return () => {
-      removeMyCursor(MVP_BOARD_ID, user.uid)
+      removeMyCursor(boardId, user.uid)
     }
   }, [user?.uid])
 
@@ -204,7 +207,7 @@ export default function Canvas({
       const now = Date.now()
       if (now - lastCursorRef.current < 50) return
       lastCursorRef.current = now
-      setMyCursor(MVP_BOARD_ID, user.uid, {
+      setMyCursor(boardId, user.uid, {
         x: worldX,
         y: worldY,
         displayName: user.displayName ?? null,
@@ -283,29 +286,7 @@ export default function Canvas({
     panStartRef.current = null
   }
 
-  const handleStageClick = (e: Konva.KonvaEventObject<MouseEvent>) => {
-    const stage = e.target.getStage()
-    if (!stage) return
-    const target = e.target
-    const isBackground =
-      target === stage ||
-      target.getClassName() === 'Layer' ||
-      (target.name && target.name() === 'canvas-background')
-    if (isBackground) {
-      onSelect(null)
-      return
-    }
-  }
-
-  const handleStageDoubleClick = (e: Konva.KonvaEventObject<MouseEvent>) => {
-    const stage = e.target.getStage()
-    if (!stage) return
-    const target = e.target
-    const isBackground =
-      target === stage ||
-      target.getClassName() === 'Layer' ||
-      (target.name && target.name() === 'canvas-background')
-    if (!isBackground) return
+  const createObjectAtPointer = (stage: Konva.Stage) => {
     const isCreateTool =
       activeTool === 'sticky' || activeTool === 'rect' || activeTool === 'circle' || activeTool === 'line'
     if (!isCreateTool) return
@@ -358,10 +339,36 @@ export default function Canvas({
       }
     }
     onOptimisticAdd?.(newObj)
-    addObject(MVP_BOARD_ID, newObj).catch((err) => {
+    onSelect(null)
+    onAfterCreateObject?.()
+    addObject(boardId, newObj).catch((err) => {
       console.error('Failed to create object', err)
       onAddFailed?.(newObj.id, err)
     })
+  }
+
+  const handleStageClick = (e: Konva.KonvaEventObject<MouseEvent>) => {
+    const stage = e.target.getStage()
+    if (!stage) return
+    const target = e.target
+    const isBackground =
+      target === stage ||
+      target.getClassName() === 'Layer' ||
+      (target.name && target.name() === 'canvas-background')
+    if (isBackground) {
+      const isCreateTool =
+        activeTool === 'sticky' || activeTool === 'rect' || activeTool === 'circle' || activeTool === 'line'
+      if (isCreateTool) {
+        createObjectAtPointer(stage)
+      } else {
+        onSelect(null)
+      }
+      return
+    }
+  }
+
+  const handleStageDoubleClick = () => {
+    // Creation is single-click only; double-click does nothing for creation
   }
 
   const isPan = spacePressed
@@ -416,6 +423,7 @@ export default function Canvas({
             onDblTap={handleStageDoubleClick}
           />
           <BoardObjects
+            boardId={boardId}
             objects={objects}
             selectedId={selectedId}
             selectedNodeRef={selectedNodeRef}

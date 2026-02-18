@@ -1,5 +1,20 @@
 -- Run this in Supabase SQL Editor (Dashboard → SQL Editor) to create tables and RLS.
 
+-- Boards: one row per whiteboard, owned by a user.
+CREATE TABLE IF NOT EXISTS boards (
+  id UUID NOT NULL PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL DEFAULT 'Untitled board',
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE boards ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can manage own boards"
+  ON boards FOR ALL TO authenticated
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
 -- Board objects (stickies, shapes). One row per object per board.
 CREATE TABLE IF NOT EXISTS board_objects (
   board_id TEXT NOT NULL,

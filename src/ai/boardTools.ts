@@ -9,7 +9,6 @@ import {
 } from '../supabase/objects'
 import type { BoardObject } from '../types/board'
 import {
-  MVP_BOARD_ID,
   STICKY_WIDTH,
   STICKY_HEIGHT,
   DEFAULT_STICKY_COLOR,
@@ -19,17 +18,16 @@ import {
   LINE_DEFAULT_HEIGHT,
 } from '../constants'
 
-const boardId = MVP_BOARD_ID
-
 export type ShapeType = 'rect' | 'circle' | 'line'
 
 /** Returns current board objects (for AI context). */
-export async function getBoardState(): Promise<BoardObject[]> {
+export async function getBoardState(boardId: string): Promise<BoardObject[]> {
   return getObjects(boardId)
 }
 
 /** Creates a sticky note. */
 export async function createStickyNote(
+  boardId: string,
   text: string,
   x: number,
   y: number,
@@ -52,6 +50,7 @@ export async function createStickyNote(
 
 /** Creates a shape (rect, circle, or line). */
 export async function createShape(
+  boardId: string,
   type: ShapeType,
   x: number,
   y: number,
@@ -77,12 +76,13 @@ export async function createShape(
 }
 
 /** Moves an object by id. */
-export async function moveObject(objectId: string, x: number, y: number): Promise<void> {
+export async function moveObject(boardId: string, objectId: string, x: number, y: number): Promise<void> {
   await updateObject(boardId, objectId, { x, y })
 }
 
 /** Resizes an object. */
 export async function resizeObject(
+  boardId: string,
   objectId: string,
   width: number,
   height: number
@@ -91,11 +91,11 @@ export async function resizeObject(
 }
 
 /** Updates text of a sticky (or other text-capable object). */
-export async function updateText(objectId: string, newText: string): Promise<void> {
+export async function updateText(boardId: string, objectId: string, newText: string): Promise<void> {
   await updateObject(boardId, objectId, { text: newText })
 }
 
 /** Changes color of an object. */
-export async function changeColor(objectId: string, color: string): Promise<void> {
+export async function changeColor(boardId: string, objectId: string, color: string): Promise<void> {
   await updateObject(boardId, objectId, { color })
 }

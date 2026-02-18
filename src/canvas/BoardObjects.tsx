@@ -1,8 +1,8 @@
 import { memo, useRef } from 'react'
-import { Group, Rect, Text, Circle, Line } from 'react-konva'
+import { Group, Rect, Text, Circle, Arrow } from 'react-konva'
 import Konva from 'konva'
 import type { BoardObject } from '../types/board'
-import { DEFAULT_STICKY_COLOR, DEFAULT_SHAPE_COLOR, MVP_BOARD_ID } from '../constants'
+import { DEFAULT_STICKY_COLOR, DEFAULT_SHAPE_COLOR } from '../constants'
 import { updateObject } from '../supabase/objects'
 
 const DRAG_UPDATE_THROTTLE_MS = 40
@@ -13,6 +13,7 @@ function textFontSize(obj: BoardObject): number {
 }
 
 type BoardObjectsProps = {
+  boardId: string
   objects: BoardObject[]
   selectedId: string | null
   selectedNodeRef?: React.RefObject<Konva.Group | null>
@@ -22,6 +23,7 @@ type BoardObjectsProps = {
 }
 
 function BoardObjects({
+  boardId,
   objects,
   selectedId,
   selectedNodeRef,
@@ -36,7 +38,7 @@ function BoardObjects({
     if (now - (lastDragUpdateRef.current[objId] ?? 0) >= DRAG_UPDATE_THROTTLE_MS) {
       lastDragUpdateRef.current[objId] = now
       onObjectMoved?.(objId, x, y)
-      updateObject(MVP_BOARD_ID, objId, { x, y }).catch((err) =>
+      updateObject(boardId, objId, { x, y }).catch((err) =>
         console.error('Failed to update position during drag', err)
       )
     }
@@ -73,7 +75,7 @@ function BoardObjects({
                 const x = node.x()
                 const y = node.y()
                 onObjectMoved?.(obj.id, x, y)
-                updateObject(MVP_BOARD_ID, obj.id, { x, y }).catch((err) =>
+                updateObject(boardId, obj.id, { x, y }).catch((err) =>
                   console.error('Failed to update sticky position', err)
                 )
               }}
@@ -136,7 +138,7 @@ function BoardObjects({
                 const x = node.x()
                 const y = node.y()
                 onObjectMoved?.(obj.id, x, y)
-                updateObject(MVP_BOARD_ID, obj.id, { x, y }).catch((err) =>
+                updateObject(boardId, obj.id, { x, y }).catch((err) =>
                   console.error('Failed to update circle position', err)
                 )
               }}
@@ -196,16 +198,20 @@ function BoardObjects({
                 const x = node.x()
                 const y = node.y()
                 onObjectMoved?.(obj.id, x, y)
-                updateObject(MVP_BOARD_ID, obj.id, { x, y }).catch((err) =>
+                updateObject(boardId, obj.id, { x, y }).catch((err) =>
                   console.error('Failed to update line position', err)
                 )
               }}
             >
-              <Line
+              <Arrow
                 points={[0, 0, obj.width, obj.height]}
                 stroke={color}
                 strokeWidth={isSelected ? 4 : 2}
                 lineCap="round"
+                lineJoin="round"
+                pointerLength={12}
+                pointerWidth={12}
+                pointerAtEnding
               />
             </Group>
           )
@@ -235,7 +241,7 @@ function BoardObjects({
               const x = node.x()
               const y = node.y()
               onObjectMoved?.(obj.id, x, y)
-              updateObject(MVP_BOARD_ID, obj.id, { x, y }).catch((err) =>
+              updateObject(boardId, obj.id, { x, y }).catch((err) =>
                 console.error('Failed to update rect position', err)
               )
             }}

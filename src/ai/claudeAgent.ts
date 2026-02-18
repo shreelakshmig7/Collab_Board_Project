@@ -104,15 +104,20 @@ const TOOLS: ToolDef[] = [
   },
 ]
 
-async function executeTool(name: string, input: Record<string, unknown>): Promise<string> {
+async function executeTool(
+  boardId: string,
+  name: string,
+  input: Record<string, unknown>
+): Promise<string> {
   try {
     switch (name) {
       case 'getBoardState': {
-        const state = await boardTools.getBoardState()
+        const state = await boardTools.getBoardState(boardId)
         return JSON.stringify(state, null, 2)
       }
       case 'createStickyNote': {
         const id = await boardTools.createStickyNote(
+          boardId,
           String(input.text ?? ''),
           Number(input.x),
           Number(input.y),
@@ -122,6 +127,7 @@ async function executeTool(name: string, input: Record<string, unknown>): Promis
       }
       case 'createShape': {
         const id = await boardTools.createShape(
+          boardId,
           input.type as 'rect' | 'circle' | 'line',
           Number(input.x),
           Number(input.y),
@@ -133,6 +139,7 @@ async function executeTool(name: string, input: Record<string, unknown>): Promis
       }
       case 'moveObject':
         await boardTools.moveObject(
+          boardId,
           String(input.objectId),
           Number(input.x),
           Number(input.y)
@@ -140,16 +147,17 @@ async function executeTool(name: string, input: Record<string, unknown>): Promis
         return 'Moved'
       case 'resizeObject':
         await boardTools.resizeObject(
+          boardId,
           String(input.objectId),
           Number(input.width) || 100,
           Number(input.height) || 100
         )
         return 'Resized'
       case 'updateText':
-        await boardTools.updateText(String(input.objectId), String(input.newText ?? ''))
+        await boardTools.updateText(boardId, String(input.objectId), String(input.newText ?? ''))
         return 'Updated text'
       case 'changeColor':
-        await boardTools.changeColor(String(input.objectId), String(input.color ?? ''))
+        await boardTools.changeColor(boardId, String(input.objectId), String(input.color ?? ''))
         return 'Changed color'
       default:
         return `Unknown tool: ${name}`
@@ -167,7 +175,8 @@ export type RunAIResult = { text: string; error?: string }
  */
 export async function runAICommand(
   userMessage: string,
-  currentObjects: BoardObject[]
+  currentObjects: BoardObject[],
+  boardId: string
 ): Promise<RunAIResult> {
   const apiKey = getApiKey()
   const client = new Anthropic({ apiKey })
@@ -229,6 +238,7 @@ export async function runAICommand(
 
     for (let i = 0; i < toolUseBlocks.length; i++) {
       const result = await executeTool(
+        boardId,
         toolUseBlocks[i].name,
         (toolUseBlocks[i].input as Record<string, unknown>) ?? {}
       )

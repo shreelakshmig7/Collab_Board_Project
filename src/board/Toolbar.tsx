@@ -78,16 +78,16 @@ export default function Toolbar({
     <div className="flex items-center gap-4 px-4 py-2 bg-white border-b border-gray-200">
       <div className="flex gap-2">
         <button type="button" onClick={() => onToolChange('sticky')} className={toolButtonClass(activeTool === 'sticky')}>
-          Sticky
+          Sticky-Note
         </button>
         <button type="button" onClick={() => onToolChange('rect')} className={toolButtonClass(activeTool === 'rect')}>
-          Rect
+          Rectangle
         </button>
         <button type="button" onClick={() => onToolChange('circle')} className={toolButtonClass(activeTool === 'circle')}>
           Circle
         </button>
         <button type="button" onClick={() => onToolChange('line')} className={toolButtonClass(activeTool === 'line')}>
-          Line
+          Arrow
         </button>
       </div>
       {selectedColorableId && (
