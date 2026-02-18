@@ -50,7 +50,15 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
     setObjects((prev) => prev.map((o) => (o.id === id ? { ...o, x, y } : o)))
   }, [])
 
+  const handleDragStart = useCallback((id: string) => {
+    draggingIdRef.current = id
+  }, [])
+  const handleDragEnd = useCallback(() => {
+    draggingIdRef.current = null
+  }, [])
+
   const lastLocalResizeRef = useRef<{ id: string; t: number }>({ id: '', t: 0 })
+  const draggingIdRef = useRef<string | null>(null)
 
   const handleObjectResized = useCallback(
     (id: string, payload: { x: number; y: number; width: number; height: number }) => {
@@ -79,6 +87,7 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
         setObjects((prev) => prev.filter((o) => o.id !== change.old.id))
         return
       }
+      if (change.event === 'UPDATE' && change.new.id === draggingIdRef.current) return
       const obj = change.new
       setObjects((prev) => {
         const idx = prev.findIndex((o) => o.id === obj.id)
@@ -277,6 +286,8 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
           onAddFailed={handleAddFailed}
           onObjectMoved={handleObjectMoved}
           onObjectResized={handleObjectResized}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
           onAfterCreateObject={() => setActiveTool('pan')}
         />
       </div>

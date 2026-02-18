@@ -42,6 +42,8 @@ type CanvasProps = {
   onAddFailed?: (id: string, err: unknown) => void
   onObjectMoved?: (id: string, x: number, y: number) => void
   onObjectResized?: (id: string, payload: { x: number; y: number; width: number; height: number }) => void
+  onDragStart?: (id: string) => void
+  onDragEnd?: () => void
   onAfterCreateObject?: () => void
 }
 
@@ -63,6 +65,8 @@ export default function Canvas({
   onAddFailed,
   onObjectMoved,
   onObjectResized,
+  onDragStart,
+  onDragEnd,
   onAfterCreateObject,
 }: CanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -438,6 +442,8 @@ export default function Canvas({
             onSelect={onSelect}
             onStartEditText={onStartEditText}
             onObjectMoved={onObjectMoved}
+            onDragStart={onDragStart}
+            onDragEnd={onDragEnd}
           />
           <Transformer
             ref={transformerRef}

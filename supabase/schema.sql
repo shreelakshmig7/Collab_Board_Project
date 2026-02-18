@@ -10,9 +10,9 @@ CREATE TABLE IF NOT EXISTS boards (
 
 ALTER TABLE boards ENABLE ROW LEVEL SECURITY;
 
--- Users can read all boards (so everyone sees boards created by others).
-CREATE POLICY "Allow authenticated read all boards"
-  ON boards FOR SELECT TO authenticated USING (true);
+-- Users can only see boards they created (own boards).
+CREATE POLICY "Users can read own boards"
+  ON boards FOR SELECT TO authenticated USING (auth.uid() = user_id);
 
 -- Users can only insert their own boards; can update/delete own or when no one is viewing the board.
 CREATE POLICY "Users can manage own boards"

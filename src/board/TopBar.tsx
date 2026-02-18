@@ -1,5 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
-import { createPortal } from 'react-dom'
+import { useState, useRef } from 'react'
 import { signOut } from '../supabase/auth'
 
 type TopBarProps = {
@@ -14,21 +13,6 @@ export default function TopBar({ presenceNames, onSignOut, boardTitle, onBackToB
   const [showPresenceDropdown, setShowPresenceDropdown] = useState(false)
   const [showClearModal, setShowClearModal] = useState(false)
   const presenceRef = useRef<HTMLDivElement>(null)
-  const [dropdownRect, setDropdownRect] = useState<DOMRect | null>(null)
-
-  useEffect(() => {
-    if (!showPresenceDropdown) return
-    const handleClickOutside = (e: MouseEvent) => {
-      const target = e.target as Node
-      if ((target as Element).closest?.('[data-presence-dropdown]')) return
-      if (presenceRef.current && !presenceRef.current.contains(target)) {
-        setShowPresenceDropdown(false)
-        setDropdownRect(null)
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [showPresenceDropdown])
 
   const count = presenceNames.length
   const label = `Online (${count})`
@@ -65,48 +49,39 @@ export default function TopBar({ presenceNames, onSignOut, boardTitle, onBackToB
               Clear board
             </button>
           )}
-        <div className="relative flex items-center gap-2" ref={presenceRef}>
+        <div
+          className="relative flex items-center gap-2"
+          ref={presenceRef}
+          onMouseEnter={() => setShowPresenceDropdown(true)}
+          onMouseLeave={() => setShowPresenceDropdown(false)}
+        >
           <span className="w-2.5 h-2.5 rounded-full bg-green-500 shrink-0" aria-hidden />
           <button
             type="button"
-            onClick={(e) => {
-              const open = !showPresenceDropdown
-              if (open) setDropdownRect(e.currentTarget.getBoundingClientRect())
-              else setDropdownRect(null)
-              setShowPresenceDropdown(open)
-            }}
-            className="text-sm text-gray-500 font-medium hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100"
+            className="text-sm text-gray-500 font-medium hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100 cursor-default"
           >
             {label}
           </button>
-          {showPresenceDropdown && dropdownRect &&
-            createPortal(
-              <div
-                data-presence-dropdown
-                className="fixed py-2 min-w-[160px] max-h-[70vh] overflow-y-auto bg-white border border-gray-200 rounded-xl shadow-xl"
-                style={{
-                  top: dropdownRect.bottom + 4,
-                  left: dropdownRect.right - 160,
-                  zIndex: 99999,
-                }}
-                role="listbox"
-              >
-                {count === 0 ? (
-                  <div className="px-4 py-2 text-sm text-gray-500">No one else online</div>
-                ) : (
-                  presenceNames.map((name) => (
-                    <div
-                      key={name}
-                      className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                      role="option"
-                    >
-                      {name}
-                    </div>
-                  ))
-                )}
-              </div>,
-              document.body
-            )}
+          {showPresenceDropdown && (
+            <div
+              data-presence-dropdown
+              className="absolute right-0 top-full mt-1 py-2 min-w-[160px] max-h-[70vh] overflow-y-auto bg-white border border-gray-200 rounded-xl shadow-xl z-[99999]"
+              role="listbox"
+            >
+              {count === 0 ? (
+                <div className="px-4 py-2 text-sm text-gray-500">No one else online</div>
+              ) : (
+                presenceNames.map((name) => (
+                  <div
+                    key={name}
+                    className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                    role="option"
+                  >
+                    {name}
+                  </div>
+                ))}
+            </div>
+          )}
         </div>
         <button
           type="button"

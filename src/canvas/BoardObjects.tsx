@@ -20,6 +20,8 @@ type BoardObjectsProps = {
   onSelect: (id: string | null) => void
   onStartEditText?: (id: string, text: string) => void
   onObjectMoved?: (id: string, x: number, y: number) => void
+  onDragStart?: (id: string) => void
+  onDragEnd?: () => void
 }
 
 function BoardObjects({
@@ -30,6 +32,8 @@ function BoardObjects({
   onSelect,
   onStartEditText,
   onObjectMoved,
+  onDragStart,
+  onDragEnd,
 }: BoardObjectsProps) {
   const lastDragUpdateRef = useRef<Record<string, number>>({})
 
@@ -66,6 +70,7 @@ function BoardObjects({
                 e.cancelBubble = true
                 onSelect(isSelected ? null : obj.id)
               }}
+              onDragStart={() => onDragStart?.(obj.id)}
               onDragMove={(e) => {
                 const node = e.target
                 throttleDragUpdate(obj.id, node.x(), node.y())
@@ -78,6 +83,7 @@ function BoardObjects({
                 updateObject(boardId, obj.id, { x, y }).catch((err) =>
                   console.error('Failed to update sticky position', err)
                 )
+                onDragEnd?.()
               }}
               onDblClick={(e) => {
                 e.cancelBubble = true
@@ -136,6 +142,7 @@ function BoardObjects({
                 e.cancelBubble = true
                 onSelect(isSelected ? null : obj.id)
               }}
+              onDragStart={() => onDragStart?.(obj.id)}
               onDragMove={(e) => {
                 const node = e.target
                 throttleDragUpdate(obj.id, node.x(), node.y())
@@ -148,6 +155,7 @@ function BoardObjects({
                 updateObject(boardId, obj.id, { x, y }).catch((err) =>
                   console.error('Failed to update circle position', err)
                 )
+                onDragEnd?.()
               }}
               onDblClick={(e) => {
                 e.cancelBubble = true
@@ -198,6 +206,7 @@ function BoardObjects({
                 e.cancelBubble = true
                 onSelect(isSelected ? null : obj.id)
               }}
+              onDragStart={() => onDragStart?.(obj.id)}
               onDragMove={(e) => {
                 const node = e.target
                 throttleDragUpdate(obj.id, node.x(), node.y())
@@ -210,6 +219,7 @@ function BoardObjects({
                 updateObject(boardId, obj.id, { x, y }).catch((err) =>
                   console.error('Failed to update line position', err)
                 )
+                onDragEnd?.()
               }}
             >
               <Arrow
@@ -241,6 +251,7 @@ function BoardObjects({
               e.cancelBubble = true
               onSelect(isSelected ? null : obj.id)
             }}
+            onDragStart={() => onDragStart?.(obj.id)}
             onDragMove={(e) => {
               const node = e.target
               throttleDragUpdate(obj.id, node.x(), node.y())
@@ -253,6 +264,7 @@ function BoardObjects({
               updateObject(boardId, obj.id, { x, y }).catch((err) =>
                 console.error('Failed to update rect position', err)
               )
+              onDragEnd?.()
             }}
             onDblClick={(e) => {
               e.cancelBubble = true

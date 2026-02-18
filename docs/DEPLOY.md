@@ -31,11 +31,13 @@ Without this, Google sign-in redirect after login may fail on the deployed app.
 
 ## 4. Database and Realtime (required for 2-user sync)
 
-**Schema:** Run [supabase/schema.sql](../supabase/schema.sql) in Supabase **SQL Editor** to create `boards`, `board_objects`, and `cursors` and RLS. If you already had the `boards` table and only your own boards were visible, add:  
-`CREATE POLICY "Allow authenticated read all boards" ON boards FOR SELECT TO authenticated USING (true);`  
-To allow rename/delete of a board when no one is viewing it (not just the owner), add:  
-`CREATE POLICY "Allow update board when no viewers" ON boards FOR UPDATE TO authenticated USING ((SELECT count(*)::int FROM cursors WHERE cursors.board_id = boards.id::text) = 0);`  
-`CREATE POLICY "Allow delete board when no viewers" ON boards FOR DELETE TO authenticated USING ((SELECT count(*)::int FROM cursors WHERE cursors.board_id = boards.id::text) = 0);`
+**Schema:** Run [supabase/schema.sql](../supabase/schema.sql) in Supabase **SQL Editor** to create `boards`, `board_objects`, and `cursors` and RLS. The boards policy restricts listing to the current user’s boards only (no one can see other users’ boards). To allow rename/delete of a board when no one is viewing it (not just the owner), the schema includes:  
+`CREATE POLICY "Allow update board when no viewers"` and `"Allow delete board when no viewers"`.
+
+**If you already had the old “read all boards” policy:** In SQL Editor run:  
+`DROP POLICY IF EXISTS "Allow authenticated read all boards" ON boards;`  
+then create the secure policy:  
+`CREATE POLICY "Users can read own boards" ON boards FOR SELECT TO authenticated USING (auth.uid() = user_id);`
 
 **Realtime (required for other user’s cursor + object moves to show):**
 
