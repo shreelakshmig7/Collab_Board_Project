@@ -20,12 +20,11 @@ function GeminiIcon({ className }: { className?: string }) {
   )
 }
 
-type BoardPageProps = { user: AppUser; boardId: string; boardName: string }
+type BoardPageProps = { user: AppUser; boardId: string; boardName: string; presenceNames: string[] }
 
-export default function BoardPage({ user, boardId, boardName }: BoardPageProps) {
+export default function BoardPage({ user, boardId, boardName, presenceNames }: BoardPageProps) {
   const navigate = useNavigate()
   const [activeTool, setActiveTool] = useState<Tool>('sticky')
-  const [presenceNames, setPresenceNames] = useState<string[]>([])
   const [objects, setObjects] = useState<BoardObject[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -261,7 +260,6 @@ export default function BoardPage({ user, boardId, boardName }: BoardPageProps) 
           boardId={boardId}
           user={user}
           activeTool={activeTool}
-          onPresenceChange={setPresenceNames}
           objects={objects}
           selectedId={selectedId}
           onSelect={setSelectedId}

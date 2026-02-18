@@ -6,8 +6,11 @@ import LoginPage from './auth/LoginPage'
 import BoardsListPage from './board/BoardsListPage'
 import BoardPage from './board/BoardPage'
 import { getBoard } from './supabase/boards'
+import { upsertPresence, removePresence, subscribePresence } from './supabase/presence'
 
-function BoardPageWrapper({ user }: { user: AppUser }) {
+const HEARTBEAT_MS = 25_000
+
+function BoardPageWrapper({ user, presenceNames }: { user: AppUser; presenceNames: string[] }) {
   const { boardId } = useParams<{ boardId: string }>()
   const navigate = useNavigate()
   const [boardName, setBoardName] = useState<string | null>(null)
@@ -48,12 +51,13 @@ function BoardPageWrapper({ user }: { user: AppUser }) {
     )
   }
 
-  return <BoardPage user={user} boardId={boardId} boardName={boardName} />
+  return <BoardPage user={user} boardId={boardId} boardName={boardName} presenceNames={presenceNames} />
 }
 
 export default function App() {
   const [user, setUser] = useState<AppUser | null>(null)
   const [loading, setLoading] = useState(true)
+  const [presenceNames, setPresenceNames] = useState<string[]>([])
 
   useEffect(() => {
     const unsub = onAuthStateChanged((u) => {
@@ -62,6 +66,31 @@ export default function App() {
     })
     return unsub
   }, [])
+
+  useEffect(() => {
+    if (!user) {
+      setPresenceNames([])
+      return
+    }
+    upsertPresence(user.uid, user.displayName)
+    const unsubPresence = subscribePresence((users) => {
+      const names = users.map((u) =>
+        u.uid === user.uid ? 'You' : (u.displayName || 'Anonymous')
+      )
+      setPresenceNames(names.length ? names : ['You'])
+    })
+    const heartbeat = setInterval(() => {
+      upsertPresence(user.uid, user.displayName)
+    }, HEARTBEAT_MS)
+    const onBeforeUnload = () => removePresence(user.uid)
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => {
+      clearInterval(heartbeat)
+      window.removeEventListener('beforeunload', onBeforeUnload)
+      removePresence(user.uid)
+      unsubPresence()
+    }
+  }, [user?.uid, user?.displayName])
 
   if (loading) {
     return <div style={{ padding: 24 }}>Loading...</div>
@@ -74,8 +103,8 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<BoardsListPage user={user} />} />
-        <Route path="/board/:boardId" element={<BoardPageWrapper user={user} />} />
+        <Route path="/" element={<BoardsListPage user={user} presenceNames={presenceNames} />} />
+        <Route path="/board/:boardId" element={<BoardPageWrapper user={user} presenceNames={presenceNames} />} />
       </Routes>
     </BrowserRouter>
   )

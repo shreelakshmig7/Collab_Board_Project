@@ -28,7 +28,7 @@ type CanvasProps = {
   boardId: string
   user: AppUser
   activeTool: Tool
-  onPresenceChange: (names: string[]) => void
+  onPresenceChange?: (names: string[]) => void
   objects: BoardObject[]
   selectedId: string | null
   onSelect: (id: string | null) => void
@@ -80,21 +80,26 @@ export default function Canvas({
   posRef.current = stagePos
   scaleRef.current = stageScale
 
+  const cursorThrottleRef = useRef(0)
+  const hasReceivedFirstCursorsRef = useRef(false)
   useEffect(() => {
-    let lastCursorUpdate = 0
-    const CURSOR_THROTTLE_MS = 120
+    hasReceivedFirstCursorsRef.current = false
+    const CURSOR_THROTTLE_MS = 80
     const unsub = subscribeCursors(boardId, (cursors) => {
-      const now = Date.now()
-      if (now - lastCursorUpdate < CURSOR_THROTTLE_MS) return
-      lastCursorUpdate = now
-      setOtherCursors(cursors)
       const names = Object.entries(cursors).map(([uid, c]) =>
         uid === user?.uid ? 'You' : (c.displayName || 'Anonymous')
       )
       if (!Object.keys(cursors).includes(user?.uid ?? '')) {
         names.push('You')
       }
-      onPresenceChange(names.length ? names : ['You'])
+      onPresenceChange?.(names.length ? names : ['You'])
+      const now = Date.now()
+      const isFirst = !hasReceivedFirstCursorsRef.current
+      if (isFirst || now - cursorThrottleRef.current >= CURSOR_THROTTLE_MS) {
+        hasReceivedFirstCursorsRef.current = true
+        cursorThrottleRef.current = now
+        setOtherCursors(cursors)
+      }
     })
     return unsub
   }, [boardId, user?.uid, onPresenceChange])
@@ -102,10 +107,16 @@ export default function Canvas({
   useEffect(() => {
     if (!user) return
     setupCursorOnDisconnect(boardId, user.uid)
+    setMyCursor(boardId, user.uid, {
+      x: 0,
+      y: 0,
+      displayName: user.displayName ?? null,
+      color: cursorColorFromUid(user.uid),
+    })
     return () => {
       removeMyCursor(boardId, user.uid)
     }
-  }, [user?.uid])
+  }, [boardId, user?.uid])
 
   const [spacePressed, setSpacePressed] = useState(false)
   const [isPanning, setIsPanning] = useState(false)
@@ -214,7 +225,7 @@ export default function Canvas({
         color: cursorColorFromUid(user.uid),
       })
     },
-    [user]
+    [boardId, user]
   )
 
   const handleMouseMove = (e: Konva.KonvaEventObject<MouseEvent>) => {

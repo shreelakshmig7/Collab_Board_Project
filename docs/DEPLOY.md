@@ -31,13 +31,14 @@ Without this, Google sign-in redirect after login may fail on the deployed app.
 
 ## 4. Database and Realtime (required for 2-user sync)
 
-**Schema:** Run [supabase/schema.sql](../supabase/schema.sql) in Supabase **SQL Editor** to create `board_objects` and `cursors` and RLS.
+**Schema:** Run [supabase/schema.sql](../supabase/schema.sql) in Supabase **SQL Editor** to create `boards`, `board_objects`, and `cursors` and RLS. If you already had the `boards` table and only your own boards were visible, add this policy so everyone sees all boards:  
+`CREATE POLICY "Allow authenticated read all boards" ON boards FOR SELECT TO authenticated USING (true);`
 
 **Realtime (required for other user’s cursor + object moves to show):**
 
 1. In Supabase Dashboard go to **Database** → **Replication** (or **Publications**).
 2. Open the **supabase_realtime** publication.
-3. Add **both** tables: **board_objects** and **cursors** (toggle or “Add table” for each).
+3. Add **board_objects**, **cursors**, and **presence** (toggle or “Add table” for each).
 4. Save.
 
 Without this, the other user’s cursor won’t appear and their object moves won’t sync.
@@ -45,7 +46,7 @@ Without this, the other user’s cursor won’t appear and their object moves wo
 ### If other users’ changes or cursors don’t show until you refresh
 
 1. **Realtime publication**  
-   In Supabase: **Database** → **Replication** → **supabase_realtime**. Ensure **board_objects** and **cursors** are both in the publication (toggled on). Save.
+   In Supabase: **Database** → **Replication** → **supabase_realtime**. Ensure **board_objects**, **cursors**, and **presence** are in the publication (toggled on). Save.
 
 2. **Browser console**  
    Open DevTools → Console. On load you may see `[Realtime] … subscription status:` if the Realtime channel failed (e.g. `CHANNEL_ERROR`). Fix any errors shown (often missing tables in publication or RLS blocking).

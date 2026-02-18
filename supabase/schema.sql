@@ -10,6 +10,11 @@ CREATE TABLE IF NOT EXISTS boards (
 
 ALTER TABLE boards ENABLE ROW LEVEL SECURITY;
 
+-- Users can read all boards (so everyone sees boards created by others).
+CREATE POLICY "Allow authenticated read all boards"
+  ON boards FOR SELECT TO authenticated USING (true);
+
+-- Users can only insert/update/delete their own boards.
 CREATE POLICY "Users can manage own boards"
   ON boards FOR ALL TO authenticated
   USING (auth.uid() = user_id)
@@ -30,6 +35,23 @@ CREATE TABLE IF NOT EXISTS board_objects (
   PRIMARY KEY (board_id, id)
 );
 
+-- Global presence: who is logged in (one row per user).
+CREATE TABLE IF NOT EXISTS presence (
+  user_id UUID NOT NULL PRIMARY KEY,
+  display_name TEXT,
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE presence ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Allow authenticated read all presence"
+  ON presence FOR SELECT TO authenticated USING (true);
+
+CREATE POLICY "Users can manage own presence"
+  ON presence FOR ALL TO authenticated
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
 -- Cursors for multiplayer presence. One row per user per board.
 CREATE TABLE IF NOT EXISTS cursors (
   board_id TEXT NOT NULL,
@@ -43,7 +65,7 @@ CREATE TABLE IF NOT EXISTS cursors (
 );
 
 -- Enable Realtime: In Supabase Dashboard go to Database → Replication,
--- find supabase_realtime and add board_objects and cursors to the publication.
+-- find supabase_realtime and add board_objects, cursors, and presence to the publication.
 
 -- RLS: allow all authenticated users to read/write (collaborative board).
 ALTER TABLE board_objects ENABLE ROW LEVEL SECURITY;

@@ -6,9 +6,9 @@ import type { Board } from '../supabase/boards'
 import { signOut } from '../supabase/auth'
 import TopBar from './TopBar'
 
-type BoardsListPageProps = { user: AppUser }
+type BoardsListPageProps = { user: AppUser; presenceNames: string[] }
 
-export default function BoardsListPage({ user }: BoardsListPageProps) {
+export default function BoardsListPage({ user, presenceNames }: BoardsListPageProps) {
   const [boards, setBoards] = useState<Board[]>([])
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
@@ -20,7 +20,7 @@ export default function BoardsListPage({ user }: BoardsListPageProps) {
   useEffect(() => {
     let cancelled = false
     setError(null)
-    listBoards(user.uid)
+    listBoards()
       .then((list) => {
         if (!cancelled) setBoards(list)
       })
@@ -67,7 +67,7 @@ export default function BoardsListPage({ user }: BoardsListPageProps) {
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
-      <TopBar presenceNames={[]} onSignOut={() => signOut()} />
+      <TopBar presenceNames={presenceNames} onSignOut={() => signOut()} />
       <main className="max-w-2xl mx-auto px-6 py-12 flex-1 w-full">
         <h1 className="text-2xl font-semibold text-gray-800 mb-8">My Boards</h1>
         {error && (

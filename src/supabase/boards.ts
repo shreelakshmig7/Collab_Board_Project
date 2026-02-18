@@ -14,12 +14,11 @@ function requireSupabase() {
   return supabase
 }
 
-/** List all boards for the current user (by user_id). */
-export async function listBoards(userId: string): Promise<Board[]> {
+/** List all boards (created by any user). */
+export async function listBoards(): Promise<Board[]> {
   const { data, error } = await requireSupabase()
     .from(TABLE)
     .select('id, name, user_id, created_at')
-    .eq('user_id', userId)
     .order('created_at', { ascending: false })
   if (error) throw error
   return (data ?? []).map((row) => ({
