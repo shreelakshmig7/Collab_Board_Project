@@ -31,8 +31,11 @@ Without this, Google sign-in redirect after login may fail on the deployed app.
 
 ## 4. Database and Realtime (required for 2-user sync)
 
-**Schema:** Run [supabase/schema.sql](../supabase/schema.sql) in Supabase **SQL Editor** to create `boards`, `board_objects`, and `cursors` and RLS. If you already had the `boards` table and only your own boards were visible, add this policy so everyone sees all boards:  
-`CREATE POLICY "Allow authenticated read all boards" ON boards FOR SELECT TO authenticated USING (true);`
+**Schema:** Run [supabase/schema.sql](../supabase/schema.sql) in Supabase **SQL Editor** to create `boards`, `board_objects`, and `cursors` and RLS. If you already had the `boards` table and only your own boards were visible, add:  
+`CREATE POLICY "Allow authenticated read all boards" ON boards FOR SELECT TO authenticated USING (true);`  
+To allow rename/delete of a board when no one is viewing it (not just the owner), add:  
+`CREATE POLICY "Allow update board when no viewers" ON boards FOR UPDATE TO authenticated USING ((SELECT count(*)::int FROM cursors WHERE cursors.board_id = boards.id::text) = 0);`  
+`CREATE POLICY "Allow delete board when no viewers" ON boards FOR DELETE TO authenticated USING ((SELECT count(*)::int FROM cursors WHERE cursors.board_id = boards.id::text) = 0);`
 
 **Realtime (required for other user’s cursor + object moves to show):**
 

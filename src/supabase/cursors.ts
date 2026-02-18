@@ -54,6 +54,16 @@ export async function deleteCursorsForBoard(boardId: string): Promise<void> {
   if (error) throw error
 }
 
+/** Number of users currently on a board (have a cursor on it). 0 = no one using the board. */
+export async function getBoardPresenceCount(boardId: string): Promise<number> {
+  const { count, error } = await requireSupabase()
+    .from(TABLE)
+    .select('*', { count: 'exact', head: true })
+    .eq('board_id', boardId)
+  if (error) throw error
+  return count ?? 0
+}
+
 export function subscribeCursors(
   boardId: string,
   callback: (cursors: Record<string, CursorPayload & { uid: string }>) => void

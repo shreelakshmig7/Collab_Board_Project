@@ -14,11 +14,21 @@ ALTER TABLE boards ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Allow authenticated read all boards"
   ON boards FOR SELECT TO authenticated USING (true);
 
--- Users can only insert/update/delete their own boards.
+-- Users can only insert their own boards; can update/delete own or when no one is viewing the board.
 CREATE POLICY "Users can manage own boards"
   ON boards FOR ALL TO authenticated
   USING (auth.uid() = user_id)
   WITH CHECK (auth.uid() = user_id);
+
+-- Any authenticated user can update a board when no one has it open (no cursor rows).
+CREATE POLICY "Allow update board when no viewers"
+  ON boards FOR UPDATE TO authenticated
+  USING ((SELECT count(*)::int FROM cursors WHERE cursors.board_id = boards.id::text) = 0);
+
+-- Any authenticated user can delete a board when no one has it open.
+CREATE POLICY "Allow delete board when no viewers"
+  ON boards FOR DELETE TO authenticated
+  USING ((SELECT count(*)::int FROM cursors WHERE cursors.board_id = boards.id::text) = 0);
 
 -- Board objects (stickies, shapes). One row per object per board.
 CREATE TABLE IF NOT EXISTS board_objects (

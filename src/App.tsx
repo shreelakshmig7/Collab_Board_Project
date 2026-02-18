@@ -72,15 +72,17 @@ export default function App() {
       setPresenceNames([])
       return
     }
-    upsertPresence(user.uid, user.displayName)
-    const unsubPresence = subscribePresence((users) => {
-      const names = users.map((u) =>
-        u.uid === user.uid ? 'You' : (u.displayName || 'Anonymous')
-      )
-      setPresenceNames(names.length ? names : ['You'])
+    let unsubPresence: (() => void) | null = null
+    void upsertPresence(user.uid, user.displayName).then(() => {
+      unsubPresence = subscribePresence((users) => {
+        const names = users.map((u) =>
+          u.uid === user.uid ? 'You' : (u.displayName || 'Anonymous')
+        )
+        setPresenceNames(names.length ? names : ['You'])
+      })
     })
     const heartbeat = setInterval(() => {
-      upsertPresence(user.uid, user.displayName)
+      void upsertPresence(user.uid, user.displayName)
     }, HEARTBEAT_MS)
     const onBeforeUnload = () => removePresence(user.uid)
     window.addEventListener('beforeunload', onBeforeUnload)
@@ -88,7 +90,7 @@ export default function App() {
       clearInterval(heartbeat)
       window.removeEventListener('beforeunload', onBeforeUnload)
       removePresence(user.uid)
-      unsubPresence()
+      unsubPresence?.()
     }
   }, [user?.uid, user?.displayName])
 

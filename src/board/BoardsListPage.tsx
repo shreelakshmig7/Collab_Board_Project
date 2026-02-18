@@ -5,7 +5,7 @@ import { listBoards, createBoard, deleteBoard, updateBoard } from '../supabase/b
 import type { Board } from '../supabase/boards'
 import { signOut } from '../supabase/auth'
 import { deleteAllObjects } from '../supabase/objects'
-import { deleteCursorsForBoard } from '../supabase/cursors'
+import { deleteCursorsForBoard, getBoardPresenceCount } from '../supabase/cursors'
 import TopBar from './TopBar'
 
 type BoardsListPageProps = { user: AppUser; presenceNames: string[] }
@@ -23,6 +23,7 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
   const [showRenameModal, setShowRenameModal] = useState(false)
   const [renameValue, setRenameValue] = useState('')
   const [renaming, setRenaming] = useState(false)
+  const [selectedBoardPresenceCount, setSelectedBoardPresenceCount] = useState<number>(0)
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -67,6 +68,18 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
 
   const selectedBoard = selectedBoardId ? boards.find((b) => b.id === selectedBoardId) : null
 
+  useEffect(() => {
+    if (!selectedBoardId) {
+      setSelectedBoardPresenceCount(0)
+      return
+    }
+    let cancelled = false
+    getBoardPresenceCount(selectedBoardId)
+      .then((count) => { if (!cancelled) setSelectedBoardPresenceCount(count) })
+      .catch(() => { if (!cancelled) setSelectedBoardPresenceCount(0) })
+    return () => { cancelled = true }
+  }, [selectedBoardId])
+
   const handleDeleteBoard = async () => {
     if (!selectedBoardId || !selectedBoard) return
     setError(null)
@@ -88,8 +101,7 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
   const handleRenameBoard = async (e: React.FormEvent) => {
     e.preventDefault()
     const name = renameValue.trim()
-    if (!name || !selectedBoardId || !selectedBoard) return
-    if (selectedBoard.user_id !== user.uid) return
+    if (!name || !selectedBoardId || !selectedBoard || !canModifyBoard) return
     setError(null)
     setRenaming(true)
     try {
@@ -104,8 +116,12 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
     }
   }
 
+  const canModifyBoard =
+    selectedBoard &&
+    (selectedBoard.user_id === user.uid || selectedBoardPresenceCount === 0)
+
   const openRenameModal = () => {
-    if (selectedBoard && selectedBoard.user_id === user.uid) {
+    if (selectedBoard && canModifyBoard) {
       setRenameValue(selectedBoard.name)
       setShowRenameModal(true)
     }
@@ -141,8 +157,14 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
             <button
               type="button"
               onClick={() => selectedBoardId && setShowDeleteConfirm(true)}
-              disabled={!selectedBoardId || (selectedBoard?.user_id !== user.uid)}
-              title={selectedBoardId && selectedBoard?.user_id !== user.uid ? 'You can only delete boards you created' : undefined}
+              disabled={!selectedBoardId || !canModifyBoard}
+              title={
+                !selectedBoardId
+                  ? 'Select a board first'
+                  : !canModifyBoard
+                    ? 'Someone is currently viewing this board'
+                    : undefined
+              }
               className="px-6 py-3 rounded-xl border border-gray-200 bg-white text-gray-700 font-medium hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Delete board
@@ -150,8 +172,14 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
             <button
               type="button"
               onClick={openRenameModal}
-              disabled={!selectedBoardId || (selectedBoard?.user_id !== user.uid)}
-              title={selectedBoardId && selectedBoard?.user_id !== user.uid ? 'You can only rename boards you created' : undefined}
+              disabled={!selectedBoardId || !canModifyBoard}
+              title={
+                !selectedBoardId
+                  ? 'Select a board first'
+                  : !canModifyBoard
+                    ? 'Someone is currently viewing this board'
+                    : undefined
+              }
               className="px-6 py-3 rounded-xl border border-gray-200 bg-white text-gray-700 font-medium hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Rename board
@@ -262,7 +290,7 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
           </div>
         )}
 
-        {showRenameModal && selectedBoard && selectedBoard.user_id === user.uid && (
+        {showRenameModal && selectedBoard && canModifyBoard && (
           <div
             className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40"
             role="dialog"

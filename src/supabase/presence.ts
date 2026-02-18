@@ -12,19 +12,23 @@ function requireSupabase() {
   return supabase
 }
 
-/** Mark current user as online (call on login and on heartbeat). */
-export function upsertPresence(userId: string, displayName: string | null) {
-  requireSupabase()
-    .from(TABLE)
-    .upsert(
-      {
-        user_id: userId,
-        display_name: displayName,
-        last_seen_at: new Date().toISOString(),
-      },
-      { onConflict: 'user_id' }
-    )
-    .then(({ error }) => error && console.error('upsertPresence', error))
+/** Mark current user as online (call on login and on heartbeat). Returns a promise so callers can await before subscribing. */
+export function upsertPresence(userId: string, displayName: string | null): Promise<void> {
+  return Promise.resolve(
+    requireSupabase()
+      .from(TABLE)
+      .upsert(
+        {
+          user_id: userId,
+          display_name: displayName,
+          last_seen_at: new Date().toISOString(),
+        },
+        { onConflict: 'user_id' }
+      )
+      .then(({ error }) => {
+        if (error) console.error('upsertPresence', error)
+      })
+  )
 }
 
 /** Remove current user from presence (call on logout / beforeunload). */
