@@ -113,7 +113,8 @@ function BoardObjects({
         }
         if (obj.type === 'circle') {
           const color = obj.color ?? DEFAULT_SHAPE_COLOR
-          const radius = obj.width / 2
+          const diameter = Math.min(obj.width, obj.height)
+          const radius = diameter / 2
           const clipPath = (): [Path2D] => {
             const p = new Path2D()
             p.arc(radius, radius, radius, 0, Math.PI * 2)
@@ -158,6 +159,8 @@ function BoardObjects({
               }}
             >
               <Circle
+                x={radius}
+                y={radius}
                 radius={radius}
                 fill={color}
                 stroke={isSelected ? '#2563eb' : '#333'}
@@ -165,11 +168,11 @@ function BoardObjects({
               />
               <Text
                 text={obj.text ?? ''}
-                width={obj.width - 12}
-                height={obj.height - 12}
+                width={diameter - 12}
+                height={diameter - 12}
                 x={6}
                 y={6}
-                fontSize={textFontSize(obj)}
+                fontSize={textFontSize({ ...obj, width: diameter, height: diameter })}
                 listening={false}
                 wrap="word"
                 align="center"
