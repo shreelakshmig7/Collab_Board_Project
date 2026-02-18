@@ -7,6 +7,11 @@ import { updateObject } from '../supabase/objects'
 
 const DRAG_UPDATE_THROTTLE_MS = 40
 
+function textFontSize(obj: BoardObject): number {
+  const base = Math.min(obj.width, obj.height) * 0.18
+  return Math.max(10, Math.min(28, base))
+}
+
 type BoardObjectsProps = {
   objects: BoardObject[]
   selectedId: string | null
@@ -95,9 +100,11 @@ function BoardObjects({
                 height={obj.height - 16}
                 x={8}
                 y={8}
-                fontSize={Math.max(10, Math.min(28, Math.min(obj.width, obj.height) * 0.18))}
+                fontSize={textFontSize(obj)}
                 listening={false}
                 wrap="word"
+                align="center"
+                verticalAlign="middle"
               />
             </Group>
           )
@@ -154,7 +161,7 @@ function BoardObjects({
                 height={obj.height - 12}
                 x={6}
                 y={6}
-                fontSize={Math.max(10, Math.min(24, obj.width * 0.2))}
+                fontSize={textFontSize(obj)}
                 listening={false}
                 wrap="word"
                 align="center"
@@ -254,9 +261,11 @@ function BoardObjects({
               height={obj.height - 16}
               x={8}
               y={8}
-              fontSize={Math.max(10, Math.min(28, Math.min(obj.width, obj.height) * 0.18))}
+              fontSize={textFontSize(obj)}
               listening={false}
               wrap="word"
+              align="center"
+              verticalAlign="middle"
             />
           </Group>
         )

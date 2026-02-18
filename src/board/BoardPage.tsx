@@ -210,7 +210,6 @@ export default function BoardPage({ user }: BoardPageProps) {
     <div className="flex flex-col h-full">
       <TopBar
         presenceNames={presenceNames}
-        onAIClick={() => setShowAIPanel((v) => !v)}
         onSignOut={handleSignOut}
       />
       <Toolbar
