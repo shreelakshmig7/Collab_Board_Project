@@ -79,7 +79,8 @@ export default function TopBar({ presenceNames, onSignOut, boardTitle, onBackToB
                   >
                     {name}
                   </div>
-                ))}
+                ))
+              )}
             </div>
           )}
         </div>
