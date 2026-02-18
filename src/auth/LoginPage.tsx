@@ -21,57 +21,23 @@ export default function LoginPage() {
   }
 
   return (
-    <div
-      style={{
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: '#f3f4f6',
-      }}
-    >
-      <div
-        style={{
-          padding: 32,
-          background: 'white',
-          borderRadius: 12,
-          boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-          textAlign: 'center',
-          maxWidth: 360,
-        }}
-      >
-        <h1 style={{ margin: '0 0 24px', fontSize: 24 }}>CollabBoard</h1>
+    <div className="min-h-screen flex items-center justify-center bg-gray-100">
+      <div className="p-8 bg-white rounded-xl shadow-lg text-center max-w-[360px]">
+        <h1 className="m-0 mb-6 text-2xl font-semibold">CollabBoard</h1>
         {!supabaseReady && (
-          <p
-            style={{
-              marginBottom: 20,
-              padding: 12,
-              background: '#fef3c7',
-              borderRadius: 8,
-              fontSize: 13,
-              color: '#92400e',
-            }}
-          >
-            Supabase is not configured. Copy <code>.env.example</code> to <code>.env</code> and add <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code> to enable sign-in.
+          <p className="mb-5 p-3 bg-amber-100 rounded-lg text-sm text-amber-800">
+            Supabase is not configured. Copy <code className="bg-amber-200 px-1 rounded">.env.example</code> to <code className="bg-amber-200 px-1 rounded">.env</code> and add <code className="bg-amber-200 px-1 rounded">VITE_SUPABASE_URL</code> and <code className="bg-amber-200 px-1 rounded">VITE_SUPABASE_ANON_KEY</code> to enable sign-in.
           </p>
         )}
         <button
           type="button"
           onClick={handleSignIn}
-          style={{
-            padding: '12px 24px',
-            fontSize: 16,
-            cursor: 'pointer',
-            background: '#2563eb',
-            color: 'white',
-            border: 'none',
-            borderRadius: 8,
-          }}
+          className="px-6 py-3 text-base cursor-pointer bg-blue-600 text-white border-0 rounded-lg hover:bg-blue-700 transition-colors"
         >
           Sign in with Google
         </button>
         {error && (
-          <p style={{ marginTop: 16, color: '#b91c1c', fontSize: 14 }}>{error}</p>
+          <p className="mt-4 text-red-600 text-sm">{error}</p>
         )}
       </div>
     </div>

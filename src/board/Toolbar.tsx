@@ -22,6 +22,12 @@ function clampSize(val: number): number {
   return Math.min(MAX_SIZE, Math.max(MIN_SIZE, val))
 }
 
+function toolButtonClass(active: boolean) {
+  return `px-4 py-2 rounded-md border border-gray-200 cursor-pointer transition-colors ${
+    active ? 'font-semibold bg-blue-100 border-blue-200' : 'font-normal bg-gray-100 hover:bg-gray-200'
+  }`
+}
+
 export default function Toolbar({
   activeTool,
   onToolChange,
@@ -69,101 +75,38 @@ export default function Toolbar({
     setFocusedInput(null)
   }
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 16,
-        padding: '8px 16px',
-        background: '#fff',
-        borderBottom: '1px solid #e5e7eb',
-      }}
-    >
-      <div style={{ display: 'flex', gap: 8 }}>
-        <button
-          type="button"
-          onClick={() => onToolChange('sticky')}
-          style={{
-            padding: '8px 16px',
-            fontWeight: activeTool === 'sticky' ? 600 : 400,
-            background: activeTool === 'sticky' ? '#dbeafe' : '#f3f4f6',
-            border: '1px solid #e5e7eb',
-            borderRadius: 6,
-            cursor: 'pointer',
-          }}
-        >
+    <div className="flex items-center gap-4 px-4 py-2 bg-white border-b border-gray-200">
+      <div className="flex gap-2">
+        <button type="button" onClick={() => onToolChange('sticky')} className={toolButtonClass(activeTool === 'sticky')}>
           Sticky
         </button>
-        <button
-          type="button"
-          onClick={() => onToolChange('rect')}
-          style={{
-            padding: '8px 16px',
-            fontWeight: activeTool === 'rect' ? 600 : 400,
-            background: activeTool === 'rect' ? '#dbeafe' : '#f3f4f6',
-            border: '1px solid #e5e7eb',
-            borderRadius: 6,
-            cursor: 'pointer',
-          }}
-        >
+        <button type="button" onClick={() => onToolChange('rect')} className={toolButtonClass(activeTool === 'rect')}>
           Rect
         </button>
-        <button
-          type="button"
-          onClick={() => onToolChange('circle')}
-          style={{
-            padding: '8px 16px',
-            fontWeight: activeTool === 'circle' ? 600 : 400,
-            background: activeTool === 'circle' ? '#dbeafe' : '#f3f4f6',
-            border: '1px solid #e5e7eb',
-            borderRadius: 6,
-            cursor: 'pointer',
-          }}
-        >
+        <button type="button" onClick={() => onToolChange('circle')} className={toolButtonClass(activeTool === 'circle')}>
           Circle
         </button>
-        <button
-          type="button"
-          onClick={() => onToolChange('line')}
-          style={{
-            padding: '8px 16px',
-            fontWeight: activeTool === 'line' ? 600 : 400,
-            background: activeTool === 'line' ? '#dbeafe' : '#f3f4f6',
-            border: '1px solid #e5e7eb',
-            borderRadius: 6,
-            cursor: 'pointer',
-          }}
-        >
+        <button type="button" onClick={() => onToolChange('line')} className={toolButtonClass(activeTool === 'line')}>
           Line
         </button>
       </div>
       {selectedColorableId && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 14, color: '#6b7280' }}>
-            {selectedStickyId ? 'Sticky color:' : 'Color:'}
-          </span>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-gray-500">{selectedStickyId ? 'Sticky color:' : 'Color:'}</span>
           {STICKY_COLORS.map((color) => (
             <button
               key={color}
               type="button"
               onClick={() => onColorChange(color)}
-              style={{
-                width: 28,
-                height: 28,
-                borderRadius: 6,
-                background: color,
-                border: '2px solid #333',
-                cursor: 'pointer',
-              }}
+              className="w-7 h-7 rounded-md border-2 border-gray-800 cursor-pointer hover:opacity-90 transition-opacity"
+              style={{ background: color }}
             />
           ))}
         </div>
       )}
       {isResizable && selectedObject && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 14, color: '#6b7280' }}>
-            {isCircle ? 'Size:' : 'W × H:'}
-          </span>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-gray-500">{isCircle ? 'Size:' : 'W × H:'}</span>
           <input
             type="number"
             min={MIN_SIZE}
@@ -174,7 +117,7 @@ export default function Toolbar({
             onBlur={commitWidth}
             onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
             onPointerDown={(e) => e.stopPropagation()}
-            style={{ width: 56, padding: '4px 6px', fontSize: 13 }}
+            className="w-14 px-1.5 py-1 text-sm border border-gray-200 rounded"
           />
           {!isCircle && (
             <input
@@ -187,7 +130,7 @@ export default function Toolbar({
               onBlur={commitHeight}
               onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
               onPointerDown={(e) => e.stopPropagation()}
-              style={{ width: 56, padding: '4px 6px', fontSize: 13 }}
+              className="w-14 px-1.5 py-1 text-sm border border-gray-200 rounded"
             />
           )}
         </div>

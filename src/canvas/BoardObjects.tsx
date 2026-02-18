@@ -12,7 +12,7 @@ type BoardObjectsProps = {
   selectedId: string | null
   selectedNodeRef?: React.RefObject<Konva.Group | null>
   onSelect: (id: string | null) => void
-  onStartEditSticky?: (id: string, text: string) => void
+  onStartEditText?: (id: string, text: string) => void
   onObjectMoved?: (id: string, x: number, y: number) => void
 }
 
@@ -21,7 +21,7 @@ function BoardObjects({
   selectedId,
   selectedNodeRef,
   onSelect,
-  onStartEditSticky,
+  onStartEditText,
   onObjectMoved,
 }: BoardObjectsProps) {
   const lastDragUpdateRef = useRef<Record<string, number>>({})
@@ -74,11 +74,11 @@ function BoardObjects({
               }}
               onDblClick={(e) => {
                 e.cancelBubble = true
-                onStartEditSticky?.(obj.id, obj.text ?? '')
+                onStartEditText?.(obj.id, obj.text ?? '')
               }}
               onDblTap={(e) => {
                 e.cancelBubble = true
-                onStartEditSticky?.(obj.id, obj.text ?? '')
+                onStartEditText?.(obj.id, obj.text ?? '')
               }}
             >
               <Rect
@@ -95,8 +95,9 @@ function BoardObjects({
                 height={obj.height - 16}
                 x={8}
                 y={8}
-                fontSize={14}
+                fontSize={Math.max(10, Math.min(28, Math.min(obj.width, obj.height) * 0.18))}
                 listening={false}
+                wrap="word"
               />
             </Group>
           )
@@ -132,12 +133,32 @@ function BoardObjects({
                   console.error('Failed to update circle position', err)
                 )
               }}
+              onDblClick={(e) => {
+                e.cancelBubble = true
+                onStartEditText?.(obj.id, obj.text ?? '')
+              }}
+              onDblTap={(e) => {
+                e.cancelBubble = true
+                onStartEditText?.(obj.id, obj.text ?? '')
+              }}
             >
               <Circle
                 radius={radius}
                 fill={color}
                 stroke={isSelected ? '#2563eb' : '#333'}
                 strokeWidth={isSelected ? 3 : 2}
+              />
+              <Text
+                text={obj.text ?? ''}
+                width={obj.width - 12}
+                height={obj.height - 12}
+                x={6}
+                y={6}
+                fontSize={Math.max(10, Math.min(24, obj.width * 0.2))}
+                listening={false}
+                wrap="word"
+                align="center"
+                verticalAlign="middle"
               />
             </Group>
           )
@@ -211,6 +232,14 @@ function BoardObjects({
                 console.error('Failed to update rect position', err)
               )
             }}
+            onDblClick={(e) => {
+              e.cancelBubble = true
+              onStartEditText?.(obj.id, obj.text ?? '')
+            }}
+            onDblTap={(e) => {
+              e.cancelBubble = true
+              onStartEditText?.(obj.id, obj.text ?? '')
+            }}
           >
             <Rect
               width={obj.width}
@@ -218,6 +247,16 @@ function BoardObjects({
               fill={color}
               stroke={isSelected ? '#2563eb' : '#333'}
               strokeWidth={isSelected ? 3 : 2}
+            />
+            <Text
+              text={obj.text ?? ''}
+              width={obj.width - 16}
+              height={obj.height - 16}
+              x={8}
+              y={8}
+              fontSize={Math.max(10, Math.min(28, Math.min(obj.width, obj.height) * 0.18))}
+              listening={false}
+              wrap="word"
             />
           </Group>
         )

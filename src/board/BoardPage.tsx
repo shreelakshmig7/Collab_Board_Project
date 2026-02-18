@@ -100,12 +100,12 @@ export default function BoardPage({ user }: BoardPageProps) {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [selectedId, editingId])
 
-  const handleStartEditSticky = useCallback((id: string, text: string) => {
+  const handleStartEditText = useCallback((id: string, text: string) => {
     setEditingId(id)
     setEditingText(text)
   }, [])
 
-  const handleSaveStickyText = useCallback(() => {
+  const handleSaveEditText = useCallback(() => {
     if (!editingId) {
       setEditingId(null)
       setEditingText('')
@@ -123,8 +123,14 @@ export default function BoardPage({ user }: BoardPageProps) {
     })
   }, [editingId, editingText, objects])
 
+  const handleCancelEdit = useCallback(() => {
+    setEditingId(null)
+    setEditingText('')
+  }, [])
+
   const selectedObject = objects.find((o) => o.id === selectedId)
   const selectedStickyId = selectedObject?.type === 'sticky' ? selectedId : null
+  const editingObject = editingId ? objects.find((o) => o.id === editingId) ?? null : null
   const selectedColorableId =
     selectedObject &&
     (selectedObject.type === 'sticky' ||
@@ -185,7 +191,7 @@ export default function BoardPage({ user }: BoardPageProps) {
   }, [aiPrompt, objects])
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div className="flex flex-col h-full">
       <TopBar
         presenceNames={presenceNames}
         onAIClick={() => setShowAIPanel((v) => !v)}
@@ -201,11 +207,11 @@ export default function BoardPage({ user }: BoardPageProps) {
         onResize={handleResize}
       />
       {createError && (
-        <div style={{ padding: '8px 12px', background: '#fef2f2', color: '#b91c1c', fontSize: 14 }}>
+        <div className="px-3 py-2 bg-red-50 text-red-700 text-sm">
           Could not create object: {createError}
         </div>
       )}
-      <div style={{ flex: 1, minHeight: 0 }}>
+      <div className="flex-1 min-h-0">
         <Canvas
           user={user}
           activeTool={activeTool}
@@ -213,7 +219,12 @@ export default function BoardPage({ user }: BoardPageProps) {
           objects={objects}
           selectedId={selectedId}
           onSelect={setSelectedId}
-          onStartEditSticky={handleStartEditSticky}
+          onStartEditText={handleStartEditText}
+          editingObject={editingObject}
+          editingText={editingText}
+          onEditingTextChange={setEditingText}
+          onSaveEdit={handleSaveEditText}
+          onCancelEdit={handleCancelEdit}
           onOptimisticAdd={handleOptimisticAdd}
           onAddFailed={handleAddFailed}
           onObjectMoved={handleObjectMoved}
@@ -221,17 +232,7 @@ export default function BoardPage({ user }: BoardPageProps) {
         />
       </div>
       {showAIPanel && (
-        <div
-          style={{
-            padding: '12px 16px',
-            background: '#f5f3ff',
-            borderBottom: '1px solid #c4b5fd',
-            display: 'flex',
-            flexWrap: 'wrap',
-            alignItems: 'center',
-            gap: 12,
-          }}
-        >
+        <div className="px-4 py-3 bg-violet-50 border-b border-violet-200 flex flex-wrap items-center gap-3">
           <input
             type="text"
             placeholder="e.g. Add a yellow sticky that says Hello"
@@ -239,96 +240,28 @@ export default function BoardPage({ user }: BoardPageProps) {
             onChange={(e) => setAiPrompt(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleRunAI()}
             disabled={aiLoading}
-            style={{
-              flex: '1',
-              minWidth: 200,
-              padding: '8px 12px',
-              fontSize: 14,
-              border: '1px solid #c4b5fd',
-              borderRadius: 6,
-            }}
+            className="flex-1 min-w-[200px] px-3 py-2 text-sm border border-violet-300 rounded-md"
           />
           <button
             type="button"
             onClick={handleRunAI}
             disabled={aiLoading}
-            style={{
-              padding: '8px 16px',
-              fontSize: 14,
-              cursor: aiLoading ? 'wait' : 'pointer',
-              background: '#5b21b6',
-              color: 'white',
-              border: 'none',
-              borderRadius: 6,
-            }}
+            className="px-4 py-2 text-sm cursor-pointer bg-violet-700 text-white border-0 rounded-md disabled:opacity-70 disabled:cursor-wait hover:bg-violet-800"
           >
             {aiLoading ? 'Running…' : 'Run'}
           </button>
           <button
             type="button"
             onClick={() => setShowAIPanel(false)}
-            style={{ padding: '8px 12px', fontSize: 14, cursor: 'pointer' }}
+            className="px-3 py-2 text-sm cursor-pointer hover:bg-violet-100 rounded-md"
           >
             Close
           </button>
           {(aiResult != null || aiError) && (
-            <span style={{ fontSize: 13, color: aiError ? '#b91c1c' : '#6b7280' }}>
+            <span className={`text-sm ${aiError ? 'text-red-600' : 'text-gray-500'}`}>
               {aiError ?? aiResult}
             </span>
           )}
-        </div>
-      )}
-      {editingId && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0,0,0,0.3)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 1000,
-          }}
-          onClick={handleSaveStickyText}
-        >
-          <div
-            style={{
-              background: 'white',
-              padding: 24,
-              borderRadius: 12,
-              minWidth: 280,
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <label style={{ display: 'block', marginBottom: 8, fontWeight: 600 }}>
-              Edit sticky text
-            </label>
-            <textarea
-              value={editingText}
-              onChange={(e) => setEditingText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault()
-                  handleSaveStickyText()
-                }
-              }}
-              style={{
-                width: '100%',
-                minHeight: 80,
-                padding: 8,
-                fontSize: 14,
-              }}
-              autoFocus
-            />
-            <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <button type="button" onClick={() => setEditingId(null)}>
-                Cancel
-              </button>
-              <button type="button" onClick={handleSaveStickyText}>
-                Save
-              </button>
-            </div>
-          </div>
         </div>
       )}
     </div>

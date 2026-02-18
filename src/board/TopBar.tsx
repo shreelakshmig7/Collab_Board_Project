@@ -8,49 +8,25 @@ type TopBarProps = {
 
 export default function TopBar({ presenceNames, onAIClick, onSignOut }: TopBarProps) {
   return (
-    <header
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '8px 16px',
-        background: '#fff',
-        borderBottom: '1px solid #e5e7eb',
-      }}
-    >
-      <span style={{ fontWeight: 600, fontSize: 18 }}>CollabBoard</span>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+    <header className="flex items-center justify-between px-4 py-2 bg-white border-b border-gray-200">
+      <span className="font-semibold text-lg">CollabBoard</span>
+      <div className="flex items-center gap-4">
         {onAIClick && (
           <button
             type="button"
             onClick={onAIClick}
-            style={{
-              padding: '6px 12px',
-              fontSize: 14,
-              cursor: 'pointer',
-              background: '#ede9fe',
-              color: '#5b21b6',
-              border: '1px solid #c4b5fd',
-              borderRadius: 6,
-            }}
+            className="px-3 py-1.5 text-sm cursor-pointer bg-violet-100 text-violet-800 border border-violet-300 rounded-md hover:bg-violet-200 transition-colors"
           >
             AI command
           </button>
         )}
-        <span style={{ fontSize: 14, color: '#6b7280' }}>
+        <span className="text-sm text-gray-500">
           {presenceNames.length ? presenceNames.join(', ') + ' online' : 'You online'}
         </span>
         <button
           type="button"
           onClick={() => (onSignOut ? onSignOut() : signOut())}
-          style={{
-            padding: '6px 12px',
-            fontSize: 14,
-            cursor: 'pointer',
-            background: '#f3f4f6',
-            border: '1px solid #e5e7eb',
-            borderRadius: 6,
-          }}
+          className="px-3 py-1.5 text-sm cursor-pointer bg-gray-100 border border-gray-200 rounded-md hover:bg-gray-200 transition-colors"
         >
           Sign out
         </button>

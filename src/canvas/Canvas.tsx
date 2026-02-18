@@ -32,7 +32,12 @@ type CanvasProps = {
   objects: BoardObject[]
   selectedId: string | null
   onSelect: (id: string | null) => void
-  onStartEditSticky?: (id: string, text: string) => void
+  onStartEditText?: (id: string, text: string) => void
+  editingObject?: BoardObject | null
+  editingText?: string
+  onEditingTextChange?: (text: string) => void
+  onSaveEdit?: () => void
+  onCancelEdit?: () => void
   onOptimisticAdd?: (obj: BoardObject) => void
   onAddFailed?: (id: string, err: unknown) => void
   onObjectMoved?: (id: string, x: number, y: number) => void
@@ -46,7 +51,12 @@ export default function Canvas({
   objects,
   selectedId,
   onSelect,
-  onStartEditSticky,
+  onStartEditText,
+  editingObject,
+  editingText = '',
+  onEditingTextChange,
+  onSaveEdit,
+  onCancelEdit,
   onOptimisticAdd,
   onAddFailed,
   onObjectMoved,
@@ -357,8 +367,18 @@ export default function Canvas({
   const isPan = spacePressed
   const cursorList = Object.values(otherCursors)
 
+  const showInlineEdit = editingObject && onEditingTextChange && onSaveEdit
+  const editBounds = showInlineEdit && editingObject
+    ? {
+        left: stagePos.x + editingObject.x * stageScale,
+        top: stagePos.y + editingObject.y * stageScale,
+        width: editingObject.width * stageScale,
+        height: editingObject.height * stageScale,
+      }
+    : null
+
   return (
-    <div ref={containerRef} style={{ width: '100%', height: '100%', background: '#f3f4f6' }}>
+    <div ref={containerRef} className="w-full h-full bg-gray-100 relative">
       <Stage
         ref={stageRef}
         width={size.width}
@@ -400,7 +420,7 @@ export default function Canvas({
             selectedId={selectedId}
             selectedNodeRef={selectedNodeRef}
             onSelect={onSelect}
-            onStartEditSticky={onStartEditSticky}
+            onStartEditText={onStartEditText}
             onObjectMoved={onObjectMoved}
           />
           <Transformer
@@ -411,6 +431,63 @@ export default function Canvas({
           <OtherCursors cursors={cursorList} currentUid={user?.uid ?? null} />
         </Layer>
       </Stage>
+      {editBounds && (
+        <>
+          <div
+            role="presentation"
+            style={{
+              position: 'absolute',
+              inset: 0,
+              zIndex: 10,
+              background: 'transparent',
+            }}
+            onClick={() => onSaveEdit?.()}
+            onKeyDown={(e) => e.key === 'Escape' && onCancelEdit?.()}
+          />
+          <div
+            style={{
+              position: 'absolute',
+              left: editBounds.left,
+              top: editBounds.top,
+              width: editBounds.width,
+              height: editBounds.height,
+              zIndex: 11,
+              padding: Math.max(4, 8 * stageScale),
+              boxSizing: 'border-box',
+              background: 'rgba(255,255,255,0.95)',
+              border: '2px solid #2563eb',
+              borderRadius: 8,
+            }}
+          >
+            <textarea
+              value={editingText}
+              onChange={(e) => onEditingTextChange?.(e.target.value)}
+              onBlur={() => onSaveEdit?.()}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  e.preventDefault()
+                  onCancelEdit?.()
+                }
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  onSaveEdit?.()
+                }
+              }}
+              style={{
+                width: '100%',
+                height: '100%',
+                resize: 'none',
+                border: 'none',
+                outline: 'none',
+                fontSize: Math.max(12, Math.min(20, (editingObject?.width ?? 100) * stageScale * 0.12)),
+                fontFamily: 'inherit',
+                lineHeight: 1.4,
+              }}
+              autoFocus
+            />
+          </div>
+        </>
+      )}
     </div>
   )
 }
