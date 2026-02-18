@@ -1,5 +1,6 @@
 import { memo } from 'react'
 import { Group, Rect, Text, Circle, Line } from 'react-konva'
+import Konva from 'konva'
 import type { BoardObject } from '../types/board'
 import { DEFAULT_STICKY_COLOR, DEFAULT_SHAPE_COLOR, MVP_BOARD_ID } from '../constants'
 import { updateObject } from '../supabase/objects'
@@ -7,6 +8,7 @@ import { updateObject } from '../supabase/objects'
 type BoardObjectsProps = {
   objects: BoardObject[]
   selectedId: string | null
+  selectedNodeRef?: React.RefObject<Konva.Group | null>
   onSelect: (id: string | null) => void
   onStartEditSticky?: (id: string, text: string) => void
   onObjectMoved?: (id: string, x: number, y: number) => void
@@ -15,6 +17,7 @@ type BoardObjectsProps = {
 function BoardObjects({
   objects,
   selectedId,
+  selectedNodeRef,
   onSelect,
   onStartEditSticky,
   onObjectMoved,
@@ -22,21 +25,24 @@ function BoardObjects({
   return (
     <>
       {objects.map((obj) => {
+        const isSelected = selectedId === obj.id
+        const groupRef = isSelected ? selectedNodeRef : undefined
         if (obj.type === 'sticky') {
           const color = obj.color ?? DEFAULT_STICKY_COLOR
           return (
             <Group
               key={obj.id}
+              ref={groupRef as React.RefObject<Konva.Group>}
               x={obj.x}
               y={obj.y}
               draggable
               onClick={(e) => {
                 e.cancelBubble = true
-                onSelect(obj.id)
+                onSelect(isSelected ? null : obj.id)
               }}
               onTap={(e) => {
                 e.cancelBubble = true
-                onSelect(obj.id)
+                onSelect(isSelected ? null : obj.id)
               }}
               onDragEnd={(e) => {
                 const node = e.target
@@ -61,8 +67,8 @@ function BoardObjects({
                 height={obj.height}
                 fill={color}
                 cornerRadius={8}
-                stroke={selectedId === obj.id ? '#2563eb' : 'transparent'}
-                strokeWidth={selectedId === obj.id ? 3 : 0}
+                stroke={isSelected ? '#2563eb' : 'transparent'}
+                strokeWidth={isSelected ? 3 : 0}
               />
               <Text
                 text={obj.text ?? ''}
@@ -82,11 +88,18 @@ function BoardObjects({
           return (
             <Group
               key={obj.id}
+              ref={groupRef as React.RefObject<Konva.Group>}
               x={obj.x}
               y={obj.y}
               draggable
-              onClick={() => onSelect(obj.id)}
-              onTap={() => onSelect(obj.id)}
+              onClick={(e) => {
+                e.cancelBubble = true
+                onSelect(isSelected ? null : obj.id)
+              }}
+              onTap={(e) => {
+                e.cancelBubble = true
+                onSelect(isSelected ? null : obj.id)
+              }}
               onDragEnd={(e) => {
                 const node = e.target
                 const x = node.x()
@@ -100,8 +113,8 @@ function BoardObjects({
               <Circle
                 radius={radius}
                 fill={color}
-                stroke={selectedId === obj.id ? '#2563eb' : '#333'}
-                strokeWidth={selectedId === obj.id ? 3 : 2}
+                stroke={isSelected ? '#2563eb' : '#333'}
+                strokeWidth={isSelected ? 3 : 2}
               />
             </Group>
           )
@@ -111,11 +124,18 @@ function BoardObjects({
           return (
             <Group
               key={obj.id}
+              ref={groupRef as React.RefObject<Konva.Group>}
               x={obj.x}
               y={obj.y}
               draggable
-              onClick={() => onSelect(obj.id)}
-              onTap={() => onSelect(obj.id)}
+              onClick={(e) => {
+                e.cancelBubble = true
+                onSelect(isSelected ? null : obj.id)
+              }}
+              onTap={(e) => {
+                e.cancelBubble = true
+                onSelect(isSelected ? null : obj.id)
+              }}
               onDragEnd={(e) => {
                 const node = e.target
                 const x = node.x()
@@ -129,7 +149,7 @@ function BoardObjects({
               <Line
                 points={[0, 0, obj.width, obj.height]}
                 stroke={color}
-                strokeWidth={selectedId === obj.id ? 4 : 2}
+                strokeWidth={isSelected ? 4 : 2}
                 lineCap="round"
               />
             </Group>
@@ -139,11 +159,18 @@ function BoardObjects({
         return (
           <Group
             key={obj.id}
+            ref={groupRef as React.RefObject<Konva.Group>}
             x={obj.x}
             y={obj.y}
             draggable
-            onClick={() => onSelect(obj.id)}
-            onTap={() => onSelect(obj.id)}
+            onClick={(e) => {
+              e.cancelBubble = true
+              onSelect(isSelected ? null : obj.id)
+            }}
+            onTap={(e) => {
+              e.cancelBubble = true
+              onSelect(isSelected ? null : obj.id)
+            }}
             onDragEnd={(e) => {
               const node = e.target
               const x = node.x()
@@ -158,8 +185,8 @@ function BoardObjects({
               width={obj.width}
               height={obj.height}
               fill={color}
-              stroke={selectedId === obj.id ? '#2563eb' : '#333'}
-              strokeWidth={selectedId === obj.id ? 3 : 2}
+              stroke={isSelected ? '#2563eb' : '#333'}
+              strokeWidth={isSelected ? 3 : 2}
             />
           </Group>
         )

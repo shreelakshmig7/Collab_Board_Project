@@ -29,10 +29,18 @@ git add . && git commit -m "Prepare for deploy" && git push origin main
 
 Without this, Google sign-in redirect after login may fail on the deployed app.
 
-## 4. Database and Realtime
+## 4. Database and Realtime (required for 2-user sync)
 
-- Ensure you ran [supabase/schema.sql](../supabase/schema.sql) in SQL Editor to create `board_objects` and `cursors` and RLS.
-- In **Database → Replication**, add `board_objects` and `cursors` to the `supabase_realtime` publication so live sync works.
+**Schema:** Run [supabase/schema.sql](../supabase/schema.sql) in Supabase **SQL Editor** to create `board_objects` and `cursors` and RLS.
+
+**Realtime (required for other user’s cursor + object moves to show):**
+
+1. In Supabase Dashboard go to **Database** → **Replication** (or **Publications**).
+2. Open the **supabase_realtime** publication.
+3. Add **both** tables: **board_objects** and **cursors** (toggle or “Add table” for each).
+4. Save.
+
+Without this, the other user’s cursor won’t appear and their object moves won’t sync.
 
 ## 5. Live URL
 

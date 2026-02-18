@@ -3,9 +3,10 @@ import { signOut } from '../supabase/auth'
 type TopBarProps = {
   presenceNames: string[]
   onAIClick?: () => void
+  onSignOut?: () => void
 }
 
-export default function TopBar({ presenceNames, onAIClick }: TopBarProps) {
+export default function TopBar({ presenceNames, onAIClick, onSignOut }: TopBarProps) {
   return (
     <header
       style={{
@@ -41,7 +42,7 @@ export default function TopBar({ presenceNames, onAIClick }: TopBarProps) {
         </span>
         <button
           type="button"
-          onClick={() => signOut()}
+          onClick={() => (onSignOut ? onSignOut() : signOut())}
           style={{
             padding: '6px 12px',
             fontSize: 14,

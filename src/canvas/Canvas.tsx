@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useCallback } from 'react'
-import { Stage, Layer, Rect } from 'react-konva'
+import { Stage, Layer, Rect, Transformer } from 'react-konva'
 import Konva from 'konva'
 import type { AppUser } from '../types/user'
 import type { Tool } from '../board/Toolbar'
@@ -36,6 +36,7 @@ type CanvasProps = {
   onOptimisticAdd?: (obj: BoardObject) => void
   onAddFailed?: (id: string, err: unknown) => void
   onObjectMoved?: (id: string, x: number, y: number) => void
+  onObjectResized?: (id: string, payload: { x: number; y: number; width: number; height: number }) => void
 }
 
 export default function Canvas({
@@ -49,9 +50,12 @@ export default function Canvas({
   onOptimisticAdd,
   onAddFailed,
   onObjectMoved,
+  onObjectResized,
 }: CanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const stageRef = useRef<Konva.Stage>(null)
+  const selectedNodeRef = useRef<Konva.Group | null>(null)
+  const transformerRef = useRef<Konva.Transformer>(null)
   const lastCursorRef = useRef<number>(0)
   const [size, setSize] = useState({ width: 800, height: 600 })
   const [stagePos, setStagePos] = useState({ x: 0, y: 0 })
@@ -104,6 +108,49 @@ export default function Canvas({
     ro.observe(el)
     return () => ro.disconnect()
   }, [])
+
+  useEffect(() => {
+    if (!selectedId) {
+      transformerRef.current?.nodes([])
+      selectedNodeRef.current = null
+      return
+    }
+    const raf = requestAnimationFrame(() => {
+      const node = selectedNodeRef.current
+      const tr = transformerRef.current
+      if (node && tr) {
+        tr.nodes([node])
+        tr.getLayer()?.batchDraw()
+      } else {
+        tr?.nodes([])
+      }
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [selectedId, objects])
+
+  const handleTransformEnd = useCallback(() => {
+    const node = selectedNodeRef.current
+    if (!node || !selectedId || !onObjectResized) return
+    const obj = objects.find((o) => o.id === selectedId)
+    if (!obj) return
+    const scaleX = node.scaleX()
+    const scaleY = node.scaleY()
+    const x = node.x()
+    const y = node.y()
+    let w: number
+    let h: number
+    if (obj.type === 'circle') {
+      const uniform = (scaleX + scaleY) / 2
+      w = obj.width * uniform
+      h = w
+    } else {
+      w = obj.width * scaleX
+      h = obj.height * scaleY
+    }
+    node.scaleX(1)
+    node.scaleY(1)
+    onObjectResized(selectedId, { x, y, width: w, height: h })
+  }, [selectedId, objects, onObjectResized])
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -228,6 +275,20 @@ export default function Canvas({
       target === stage ||
       target.getClassName() === 'Layer' ||
       (target.name && target.name() === 'canvas-background')
+    if (isBackground) {
+      onSelect(null)
+      return
+    }
+  }
+
+  const handleStageDoubleClick = (e: Konva.KonvaEventObject<MouseEvent>) => {
+    const stage = e.target.getStage()
+    if (!stage) return
+    const target = e.target
+    const isBackground =
+      target === stage ||
+      target.getClassName() === 'Layer' ||
+      (target.name && target.name() === 'canvas-background')
     if (!isBackground) return
     const isCreateTool =
       activeTool === 'sticky' || activeTool === 'rect' || activeTool === 'circle' || activeTool === 'line'
@@ -306,6 +367,8 @@ export default function Canvas({
         onMouseLeave={handleStageMouseUp}
         onClick={handleStageClick}
         onTap={handleStageClick}
+        onDblClick={handleStageDoubleClick}
+        onDblTap={handleStageDoubleClick}
         x={stagePos.x}
         y={stagePos.y}
         scaleX={stageScale}
@@ -320,16 +383,24 @@ export default function Canvas({
             y={-10000}
             width={20000}
             height={20000}
-            listening={activeTool === 'sticky' || activeTool === 'rect' || activeTool === 'circle' || activeTool === 'line'}
+            listening={true}
             onClick={handleStageClick}
             onTap={handleStageClick}
+            onDblClick={handleStageDoubleClick}
+            onDblTap={handleStageDoubleClick}
           />
           <BoardObjects
             objects={objects}
             selectedId={selectedId}
+            selectedNodeRef={selectedNodeRef}
             onSelect={onSelect}
             onStartEditSticky={onStartEditSticky}
             onObjectMoved={onObjectMoved}
+          />
+          <Transformer
+            ref={transformerRef}
+            rotateEnabled={false}
+            onTransformEnd={handleTransformEnd}
           />
           <OtherCursors cursors={cursorList} currentUid={user?.uid ?? null} />
         </Layer>

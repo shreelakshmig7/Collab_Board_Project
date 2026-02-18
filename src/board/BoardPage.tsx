@@ -5,6 +5,8 @@ import Toolbar from './Toolbar'
 import type { Tool } from './Toolbar'
 import Canvas from '../canvas/Canvas'
 import { subscribeObjects, updateObject, deleteObject } from '../supabase/objects'
+import { removeMyCursor } from '../supabase/cursors'
+import { signOut } from '../supabase/auth'
 import { MVP_BOARD_ID } from '../constants'
 import type { BoardObject } from '../types/board'
 import { runAICommand } from '../ai/claudeAgent'
@@ -37,6 +39,19 @@ export default function BoardPage({ user }: BoardPageProps) {
   const handleObjectMoved = useCallback((id: string, x: number, y: number) => {
     setObjects((prev) => prev.map((o) => (o.id === id ? { ...o, x, y } : o)))
   }, [])
+
+  const handleObjectResized = useCallback(
+    (id: string, payload: { x: number; y: number; width: number; height: number }) => {
+      const { x, y, width, height } = payload
+      setObjects((prev) =>
+        prev.map((o) => (o.id === id ? { ...o, x, y, width, height } : o))
+      )
+      updateObject(MVP_BOARD_ID, id, { x, y, width, height }).catch((err) =>
+        console.error('Failed to update object size', err)
+      )
+    },
+    []
+  )
 
   const setObjectsFromSubscription = useCallback((data: BoardObject[]) => {
     setObjects((prev) => {
@@ -129,6 +144,11 @@ export default function BoardPage({ user }: BoardPageProps) {
     [selectedId]
   )
 
+  const handleSignOut = useCallback(() => {
+    removeMyCursor(MVP_BOARD_ID, user.uid)
+    signOut()
+  }, [user.uid])
+
   const handleRunAI = useCallback(async () => {
     const prompt = aiPrompt.trim()
     if (!prompt) return
@@ -151,6 +171,7 @@ export default function BoardPage({ user }: BoardPageProps) {
       <TopBar
         presenceNames={presenceNames}
         onAIClick={() => setShowAIPanel((v) => !v)}
+        onSignOut={handleSignOut}
       />
       <Toolbar
         activeTool={activeTool}
@@ -178,6 +199,7 @@ export default function BoardPage({ user }: BoardPageProps) {
           onOptimisticAdd={handleOptimisticAdd}
           onAddFailed={handleAddFailed}
           onObjectMoved={handleObjectMoved}
+          onObjectResized={handleObjectResized}
         />
       </div>
       {showAIPanel && (
