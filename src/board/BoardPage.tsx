@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import type { AppUser } from '../types/user'
 import TopBar from './TopBar'
 import Toolbar from './Toolbar'
@@ -40,9 +40,12 @@ export default function BoardPage({ user }: BoardPageProps) {
     setObjects((prev) => prev.map((o) => (o.id === id ? { ...o, x, y } : o)))
   }, [])
 
+  const lastLocalResizeRef = useRef<{ id: string; t: number }>({ id: '', t: 0 })
+
   const handleObjectResized = useCallback(
     (id: string, payload: { x: number; y: number; width: number; height: number }) => {
       const { x, y, width, height } = payload
+      lastLocalResizeRef.current = { id, t: Date.now() }
       setObjects((prev) =>
         prev.map((o) => (o.id === id ? { ...o, x, y, width, height } : o))
       )
@@ -70,8 +73,21 @@ export default function BoardPage({ user }: BoardPageProps) {
       setObjects((prev) => {
         const idx = prev.findIndex((o) => o.id === obj.id)
         if (idx === -1) return [...prev, obj]
+        const existing = prev[idx]
+        const { id: lastId, t } = lastLocalResizeRef.current
+        const justResized = obj.id === lastId && Date.now() - t < 1500
         const next = [...prev]
-        next[idx] = obj
+        if (change.event === 'UPDATE' && justResized) {
+          next[idx] = {
+            ...obj,
+            x: existing.x,
+            y: existing.y,
+            width: existing.width,
+            height: existing.height,
+          }
+        } else {
+          next[idx] = obj
+        }
         return next
       })
     },

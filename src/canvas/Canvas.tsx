@@ -454,7 +454,7 @@ export default function Canvas({
               zIndex: 11,
               padding: Math.max(4, 8 * stageScale),
               boxSizing: 'border-box',
-              background: 'rgba(255,255,255,0.95)',
+              background: editingObject?.color ?? 'rgba(255,255,255,0.95)',
               border: '2px solid #2563eb',
               borderRadius: 8,
             }}
