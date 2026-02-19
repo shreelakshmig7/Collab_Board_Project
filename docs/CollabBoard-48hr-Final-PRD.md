@@ -50,6 +50,29 @@
 
 ---
 
+## 📋 PR & MERGE REQUIREMENTS
+
+All PRs must satisfy these before merge.
+
+### Test-Driven Development (TDD)
+
+- Write a failing test **before** any new production code.
+- Follow Red → Green → Refactor cycle.
+- PRs that add features **must** include the test written first.
+- `npm test` must pass before merge.
+- Colocate tests: `Bar.tsx` → `Bar.test.tsx`.
+- See `.cursor/rules/tdd-workflow.mdc` for full TDD rules.
+
+### Error Handling
+
+- **Do not swallow errors.** Every `.catch()` must log or handle explicitly.
+- Use `console.error('context message', err)` in catch blocks; never `.catch(() => {})`.
+- For async effects, use `cancelled` / `abort` flags to avoid state updates after unmount.
+- New async code must include error handling in its implementation.
+- See `.cursor/rules/coding-standards.mdc` for error handling examples.
+
+---
+
 ## 📅 48-HOUR BREAKDOWN
 
 ---

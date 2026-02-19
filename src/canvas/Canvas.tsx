@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useCallback } from 'react'
+import { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import { Stage, Layer, Rect, Transformer } from 'react-konva'
 import Konva from 'konva'
 import type { AppUser } from '../types/user'
@@ -28,6 +28,7 @@ import {
 } from '../supabase/cursors'
 import { addObject } from '../supabase/objects'
 import type { BoardObject } from '../types/board'
+import { getObjectIdsInSelectionRect, applyMarqueeToSelection } from './selectionRect'
 import OtherCursors from './OtherCursors'
 import BoardObjects from './BoardObjects'
 
@@ -60,6 +61,10 @@ type CanvasProps = {
   onConnectorResized?: (id: string, fromX: number, fromY: number, toX: number, toY: number) => void
   onConnectorMoved?: (id: string, fromX: number, fromY: number, toX: number, toY: number) => void
   onViewportChange?: (center: { x: number; y: number }) => void
+  /** Drag whole selection from empty space inside selection box */
+  onSelectionDragStart?: (worldPos: { x: number; y: number }) => void
+  onSelectionDragMove?: (deltaX: number, deltaY: number) => void
+  onSelectionDragEnd?: () => void
 }
 
 export default function Canvas({
@@ -91,6 +96,9 @@ export default function Canvas({
   onConnectorResized,
   onConnectorMoved,
   onViewportChange,
+  onSelectionDragStart,
+  onSelectionDragMove,
+  onSelectionDragEnd,
 }: CanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const stageRef = useRef<Konva.Stage>(null)
@@ -111,6 +119,15 @@ export default function Canvas({
 
   // Connector tool: pending first object click
   const [pendingConnectorFrom, setPendingConnectorFrom] = useState<string | null>(null)
+
+  // Marquee (drag-to-select) in select tool: start and current pointer in world coords
+  const [marqueeStart, setMarqueeStart] = useState<{ x: number; y: number } | null>(null)
+  const [marqueeCurrent, setMarqueeCurrent] = useState<{ x: number; y: number } | null>(null)
+  const marqueeShiftKeyRef = useRef(false)
+  const justAppliedMarqueeRef = useRef(false)
+  const [isSelectionDragging, setIsSelectionDragging] = useState(false)
+  const selectionDragStartWorldRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 })
+  const justAppliedSelectionDragRef = useRef(false)
 
   const lastCursorPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 })
   const cursorThrottleRef = useRef(0)
@@ -455,19 +472,66 @@ export default function Canvas({
     const stage = e.target.getStage()
     if (!stage) return
 
-    // Click+drag on empty canvas = pan
-    if (isBackgroundTarget(e.target)) {
-      const pointer = stage.getPointerPosition()
-      if (!pointer) return
-      setIsPanning(true)
-      panStartRef.current = { pointer: { ...pointer }, stagePos: { ...stagePos } }
+    if (!isBackgroundTarget(e.target)) return
+
+    const world = getWorldPos(stage)
+    if (!world) return
+
+    // Select tool: if click is inside selection box (empty space between selected objects), drag whole selection; otherwise start marquee
+    if (activeTool === 'select') {
+      const insideSelectionBox =
+        selectionBoxBounds &&
+        world.x >= selectionBoxBounds.x &&
+        world.x <= selectionBoxBounds.x + selectionBoxBounds.width &&
+        world.y >= selectionBoxBounds.y &&
+        world.y <= selectionBoxBounds.y + selectionBoxBounds.height
+      if (
+        selectedIds.length > 0 &&
+        insideSelectionBox &&
+        onSelectionDragStart &&
+        onSelectionDragMove &&
+        onSelectionDragEnd
+      ) {
+        selectionDragStartWorldRef.current = world
+        onSelectionDragStart(world)
+        setIsSelectionDragging(true)
+        return
+      }
+      marqueeShiftKeyRef.current = e.evt.shiftKey
+      setMarqueeStart(world)
+      setMarqueeCurrent(world)
+      return
     }
+
+    // Click+drag on empty canvas = pan
+    const pointer = stage.getPointerPosition()
+    if (!pointer) return
+    setIsPanning(true)
+    panStartRef.current = { pointer: { ...pointer }, stagePos: { ...stagePos } }
   }
 
   const handleStageMouseMove = (e: Konva.KonvaEventObject<MouseEvent>) => {
-    if (!isPanning || !panStartRef.current) return
     const stage = e.target.getStage()
     if (!stage) return
+
+    // Selection drag from empty space: apply delta to all selected
+    if (isSelectionDragging && onSelectionDragMove) {
+      const world = getWorldPos(stage)
+      if (world) {
+        const start = selectionDragStartWorldRef.current
+        onSelectionDragMove(world.x - start.x, world.y - start.y)
+      }
+      return
+    }
+
+    // Marquee: update current point
+    if (marqueeStart !== null) {
+      const world = getWorldPos(stage)
+      if (world) setMarqueeCurrent(world)
+      return
+    }
+
+    if (!isPanning || !panStartRef.current) return
     const pointer = stage.getPointerPosition()
     if (!pointer) return
     const { pointer: startPointer, stagePos: startStagePos } = panStartRef.current
@@ -478,7 +542,30 @@ export default function Canvas({
     setStagePos(p)
   }
 
-  const handleStageMouseUp = (_e: Konva.KonvaEventObject<MouseEvent>) => {
+  const handleStageMouseUp = () => {
+    // Finish selection drag from empty space
+    if (isSelectionDragging) {
+      onSelectionDragEnd?.()
+      justAppliedSelectionDragRef.current = true
+      setIsSelectionDragging(false)
+    }
+
+    // Finish marquee and apply selection
+    if (marqueeStart !== null && marqueeCurrent !== null) {
+      const x = Math.min(marqueeStart.x, marqueeCurrent.x)
+      const y = Math.min(marqueeStart.y, marqueeCurrent.y)
+      const width = marqueeCurrent.x - marqueeStart.x
+      const height = marqueeCurrent.y - marqueeStart.y
+      const rect = { x, y, width, height }
+      const marqueeIds = getObjectIdsInSelectionRect(objects, rect)
+      const shiftKey = marqueeShiftKeyRef.current
+      const newIds = applyMarqueeToSelection(marqueeIds, selectedIds, shiftKey)
+      onSelect(newIds)
+      justAppliedMarqueeRef.current = true
+      setMarqueeStart(null)
+      setMarqueeCurrent(null)
+    }
+
     setIsPanning(false)
     panStartRef.current = null
   }
@@ -492,6 +579,16 @@ export default function Canvas({
       target.getClassName() === 'Layer' ||
       (target.name && target.name() === 'canvas-background')
     if (!isBackground) return
+
+    // Avoid clearing selection when this click is the release after a marquee or selection drag
+    if (justAppliedMarqueeRef.current) {
+      justAppliedMarqueeRef.current = false
+      return
+    }
+    if (justAppliedSelectionDragRef.current) {
+      justAppliedSelectionDragRef.current = false
+      return
+    }
 
     // Click (without drag) on background: create object, clear selection, or cancel connector
     if (isCreateTool) {
@@ -538,11 +635,42 @@ export default function Canvas({
 
   const cursorStyle = isPanning
     ? 'grabbing'
-    : activeTool === 'connector'
-      ? pendingConnectorFrom
+    : isSelectionDragging
+      ? 'grabbing'
+      : marqueeStart !== null
         ? 'crosshair'
-        : 'cell'
-      : 'grab'
+        : activeTool === 'connector'
+          ? pendingConnectorFrom
+            ? 'crosshair'
+            : 'cell'
+          : 'grab'
+
+  /** Bounding box in world coords for multi-select (single box around all selected) */
+  const selectionBoxBounds = useMemo(() => {
+    if (selectedIds.length <= 1) return null
+    let minX = Infinity
+    let minY = Infinity
+    let maxX = -Infinity
+    let maxY = -Infinity
+    for (const id of selectedIds) {
+      const o = objects.find((obj) => obj.id === id)
+      if (!o) continue
+      const w = Math.max(0, o.width)
+      const h = Math.max(0, o.height)
+      minX = Math.min(minX, o.x)
+      minY = Math.min(minY, o.y)
+      maxX = Math.max(maxX, o.x + w)
+      maxY = Math.max(maxY, o.y + h)
+    }
+    if (minX === Infinity) return null
+    const padding = 4
+    return {
+      x: minX - padding,
+      y: minY - padding,
+      width: maxX - minX + padding * 2,
+      height: maxY - minY + padding * 2,
+    }
+  }, [objects, selectedIds])
 
   return (
     <div ref={containerRef} className="w-full h-full bg-gray-100 relative">
@@ -606,6 +734,33 @@ export default function Canvas({
             }}
             onTransformEnd={handleTransformEnd}
           />
+          {/* Multi-select bounding box (single box around all selected objects) */}
+          {selectionBoxBounds && (
+            <Rect
+              x={selectionBoxBounds.x}
+              y={selectionBoxBounds.y}
+              width={selectionBoxBounds.width}
+              height={selectionBoxBounds.height}
+              fill="transparent"
+              stroke="#2563eb"
+              strokeWidth={2}
+              dash={[6, 4]}
+              listening={false}
+            />
+          )}
+          {/* Drag-to-select marquee rect (select tool only) */}
+          {marqueeStart !== null && marqueeCurrent !== null && (
+            <Rect
+              x={Math.min(marqueeStart.x, marqueeCurrent.x)}
+              y={Math.min(marqueeStart.y, marqueeCurrent.y)}
+              width={Math.abs(marqueeCurrent.x - marqueeStart.x)}
+              height={Math.abs(marqueeCurrent.y - marqueeStart.y)}
+              fill="rgba(37, 99, 235, 0.15)"
+              stroke="#2563eb"
+              strokeWidth={2}
+              listening={false}
+            />
+          )}
           <OtherCursors cursors={cursorList} currentUid={user?.uid ?? null} />
         </Layer>
       </Stage>

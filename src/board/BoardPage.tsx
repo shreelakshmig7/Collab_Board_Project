@@ -113,17 +113,30 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
       lastMovedIdsRef.current.ids.add(id)
       lastMovedIdsRef.current.t = Date.now()
     }
+    // Persist all selected objects' positions (multi-drag may have moved others only in state)
+    if (selectedIds.length > 0) {
+      setObjects((prev) => {
+        for (const selId of selectedIds) {
+          const o = prev.find((x) => x.id === selId)
+          if (o) {
+            updateObject(boardId, selId, { x: o.x, y: o.y }).catch((err: unknown) =>
+              console.error('Failed to update object position after drag', err)
+            )
+          }
+        }
+        return prev
+      })
+    }
     draggingIdRef.current = null
     dragStartPositionsRef.current = new Map()
-  }, [])
+  }, [boardId, selectedIds])
 
-  /** Called during multi-drag: move all other selected objects by the same delta as the dragged one */
+  /** Called during multi-drag: move all selected objects (including the dragged one) by the same delta so state stays in sync and the dragged object does not snap back on re-render */
   const handleMultiDragMove = useCallback(
-    (movedId: string, deltaX: number, deltaY: number) => {
+    (_movedId: string, deltaX: number, deltaY: number) => {
       if (selectedIds.length <= 1) return
       setObjects((prev) =>
         prev.map((o) => {
-          if (o.id === movedId) return o // Konva handles this one
           if (!selectedIds.includes(o.id)) return o
           const start = dragStartPositionsRef.current.get(o.id)
           if (!start) return o
@@ -133,6 +146,53 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
     },
     [selectedIds]
   )
+
+  /** Last positions applied during selection-drag-from-empty (used to persist on drag end) */
+  const selectionDragLastPositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map())
+
+  const handleSelectionDragStart = useCallback(
+    (_worldPos: { x: number; y: number }) => {
+      setObjects((prev) => {
+        const positions = new Map<string, { x: number; y: number }>()
+        for (const obj of prev) {
+          if (selectedIds.includes(obj.id)) positions.set(obj.id, { x: obj.x, y: obj.y })
+        }
+        dragStartPositionsRef.current = positions
+        selectionDragLastPositionsRef.current = new Map(positions)
+        return prev
+      })
+    },
+    [selectedIds]
+  )
+
+  const handleSelectionDragMove = useCallback(
+    (deltaX: number, deltaY: number) => {
+      if (selectedIds.length === 0) return
+      setObjects((prev) =>
+        prev.map((o) => {
+          if (!selectedIds.includes(o.id)) return o
+          const start = dragStartPositionsRef.current.get(o.id)
+          if (!start) return o
+          const newX = start.x + deltaX
+          const newY = start.y + deltaY
+          selectionDragLastPositionsRef.current.set(o.id, { x: newX, y: newY })
+          return { ...o, x: newX, y: newY }
+        })
+      )
+    },
+    [selectedIds]
+  )
+
+  const handleSelectionDragEnd = useCallback(() => {
+    const toPersist = selectionDragLastPositionsRef.current
+    for (const [id, pos] of toPersist) {
+      updateObject(boardId, id, { x: pos.x, y: pos.y }).catch((err: unknown) =>
+        console.error('Failed to update object position after selection drag', err)
+      )
+    }
+    dragStartPositionsRef.current = new Map()
+    selectionDragLastPositionsRef.current = new Map()
+  }, [boardId])
 
   const lastLocalResizeRef = useRef<{ id: string; t: number }>({ id: '', t: 0 })
   const draggingIdRef = useRef<string | null>(null)
@@ -628,6 +688,9 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
           onConnectorResized={handleConnectorResized}
           onConnectorMoved={handleConnectorMoved}
           onViewportChange={(c) => { viewportCenterRef.current = c }}
+          onSelectionDragStart={handleSelectionDragStart}
+          onSelectionDragMove={handleSelectionDragMove}
+          onSelectionDragEnd={handleSelectionDragEnd}
         />
       </div>
 
