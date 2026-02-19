@@ -30,7 +30,8 @@ function BoardPageWrapper({ user, presenceNames }: { user: AppUser; presenceName
         }
         setBoardName(board.name)
       })
-      .catch(() => {
+      .catch((err: unknown) => {
+        console.error('getBoard failed', err)
         if (!cancelled) setNotFound(true)
       })
     return () => {

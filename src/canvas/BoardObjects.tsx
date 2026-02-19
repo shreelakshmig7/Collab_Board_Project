@@ -606,7 +606,9 @@ function BoardObjects({
                           boardId,
                           grandchild.id,
                           { x: worldX, y: worldY, parent_id: newParentId } as Parameters<typeof updateObject>[2]
-                        ).catch(() => {})
+                        ).catch((err: unknown) =>
+                          console.error('Failed to update grandchild position', err)
+                        )
                         onDragEnd?.()
                       }
                       if (grandchild.type === 'frame') {
@@ -664,10 +666,15 @@ function BoardObjects({
                             { x: nwx, y: nwy, parent_id: gcNewParentId } as Parameters<
                               typeof updateObject
                             >[2]
-                          ).catch(() => {})
+                          ).catch((err: unknown) =>
+                            console.error('Failed to update grandchild frame position', err)
+                          )
                           getFrameDescendants(objects, grandchild.id).forEach((d) => {
                             onObjectMoved?.(d.id, d.x + ddx, d.y + ddy)
-                            updateObject(boardId, d.id, { x: d.x + ddx, y: d.y + ddy }).catch(() => {})
+                            updateObject(boardId, d.id, { x: d.x + ddx, y: d.y + ddy }).catch(
+                              (err: unknown) =>
+                                console.error('Failed to update grandchild frame descendant position', err)
+                            )
                           })
                           onDragEnd?.()
                         }
