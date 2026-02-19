@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { signOut } from '../supabase/auth'
 
 type TopBarProps = {
@@ -22,6 +22,14 @@ export default function TopBar({ presenceNames, onSignOut, boardTitle, onBackToB
     setShowClearModal(false)
   }
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowPresenceDropdown(false)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
+
   return (
     <>
       <header className="relative z-[100] flex items-center justify-between px-5 py-3 bg-white/95 backdrop-blur-sm border-b border-gray-200/80 shadow-sm">
@@ -30,7 +38,7 @@ export default function TopBar({ presenceNames, onSignOut, boardTitle, onBackToB
             <button
               type="button"
               onClick={onBackToBoards}
-              className="text-sm text-gray-600 hover:text-gray-800 font-medium"
+              className="text-sm text-gray-600 hover:text-gray-800 font-medium focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus:outline-none rounded"
             >
               ← Boards
             </button>
@@ -44,7 +52,7 @@ export default function TopBar({ presenceNames, onSignOut, boardTitle, onBackToB
             <button
               type="button"
               onClick={() => setShowClearModal(true)}
-              className="px-4 py-2 text-sm font-medium rounded-xl border border-gray-200 bg-gray-100 text-gray-700 hover:bg-gray-200 transition-all"
+              className="px-4 py-2 text-sm font-medium rounded-xl border border-gray-200 bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus:outline-none"
             >
               Clear board
             </button>
@@ -58,7 +66,7 @@ export default function TopBar({ presenceNames, onSignOut, boardTitle, onBackToB
           <span className="w-2.5 h-2.5 rounded-full bg-green-500 shrink-0" aria-hidden />
           <button
             type="button"
-            className="text-sm text-gray-500 font-medium hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100 cursor-default"
+            className="text-sm text-gray-500 font-medium hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100 cursor-default focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus:outline-none"
           >
             {label}
           </button>
@@ -87,7 +95,7 @@ export default function TopBar({ presenceNames, onSignOut, boardTitle, onBackToB
         <button
           type="button"
           onClick={() => (onSignOut ? onSignOut() : signOut())}
-          className="px-4 py-2 text-sm font-medium cursor-pointer bg-gray-100 text-gray-700 border border-gray-200 rounded-xl hover:bg-gray-200 active:scale-[0.98] transition-all duration-200"
+          className="px-4 py-2 text-sm font-medium cursor-pointer bg-gray-100 text-gray-700 border border-gray-200 rounded-xl hover:bg-gray-200 active:scale-[0.98] transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus:outline-none"
         >
           Sign out
         </button>
@@ -96,7 +104,7 @@ export default function TopBar({ presenceNames, onSignOut, boardTitle, onBackToB
 
       {showClearModal && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 overscroll-contain"
           role="dialog"
           aria-modal="true"
           aria-labelledby="clear-modal-title"
@@ -112,14 +120,14 @@ export default function TopBar({ presenceNames, onSignOut, boardTitle, onBackToB
               <button
                 type="button"
                 onClick={() => setShowClearModal(false)}
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-xl hover:bg-gray-200"
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-xl hover:bg-gray-200 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus:outline-none"
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={handleClearConfirm}
-                className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-xl hover:bg-red-700"
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-xl hover:bg-red-700 focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 focus:outline-none"
               >
                 Delete
               </button>

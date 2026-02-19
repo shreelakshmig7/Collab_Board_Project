@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
 import type { BoardObject } from '../types/board'
 
-export type Tool = 'sticky' | 'rect' | 'circle' | 'line' | 'pan'
+export type Tool = 'sticky' | 'rect' | 'circle' | 'line' | 'frame' | 'text' | 'connector' | 'pan'
 
-const STICKY_COLORS = ['#FEF08A', '#FECACA', '#BBF7D0', '#BFDBFE']
+const COLORS = ['#FEF08A', '#FECACA', '#BBF7D0', '#BFDBFE', '#E9D5FF', '#FED7AA', '#ffffff', '#1e293b']
 
 const MIN_SIZE = 20
 const MAX_SIZE = 800
@@ -11,31 +11,37 @@ const MAX_SIZE = 800
 type ToolbarProps = {
   activeTool: Tool
   onToolChange: (tool: Tool) => void
-  selectedStickyId: string | null
-  selectedColorableId: string | null
+  selectedIds: string[]
   selectedObject: BoardObject | null
+  selectedColorableId: string | null
   onColorChange: (color: string) => void
   onResize: (width: number, height: number) => void
+  onDuplicate: () => void
+  onDelete: () => void
 }
 
 function clampSize(val: number): number {
   return Math.min(MAX_SIZE, Math.max(MIN_SIZE, val))
 }
 
-function toolButtonClass(active: boolean) {
-  return `px-4 py-2 rounded-md border border-gray-200 cursor-pointer transition-colors ${
-    active ? 'font-semibold bg-blue-100 border-blue-200' : 'font-normal bg-gray-100 hover:bg-gray-200'
+function toolBtn(active: boolean) {
+  return `px-3 py-1.5 text-sm rounded-md border cursor-pointer transition-colors focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 focus:outline-none ${
+    active
+      ? 'font-semibold bg-blue-100 border-blue-300 text-blue-800'
+      : 'font-normal bg-gray-100 border-gray-200 hover:bg-gray-200 text-gray-700'
   }`
 }
 
 export default function Toolbar({
   activeTool,
   onToolChange,
-  selectedStickyId,
-  selectedColorableId,
+  selectedIds,
   selectedObject,
+  selectedColorableId,
   onColorChange,
   onResize,
+  onDuplicate,
+  onDelete,
 }: ToolbarProps) {
   const [localWidth, setLocalWidth] = useState('')
   const [localHeight, setLocalHeight] = useState('')
@@ -43,10 +49,7 @@ export default function Toolbar({
 
   const isResizable =
     selectedObject &&
-    (selectedObject.type === 'sticky' ||
-      selectedObject.type === 'rect' ||
-      selectedObject.type === 'circle' ||
-      selectedObject.type === 'line')
+    ['sticky', 'rect', 'circle', 'frame', 'text'].includes(selectedObject.type)
   const isCircle = selectedObject?.type === 'circle'
 
   useEffect(() => {
@@ -70,67 +73,116 @@ export default function Toolbar({
     const num = Number(localHeight)
     const h = clampSize(Number.isFinite(num) ? num : MIN_SIZE)
     setLocalHeight(String(h))
-    if (isCircle) onResize(selectedObject.width, h)
-    else onResize(selectedObject.width, h)
+    onResize(selectedObject.width, h)
     setFocusedInput(null)
   }
+
+  const hasSelection = selectedIds.length > 0
+
   return (
-    <div className="flex items-center gap-4 px-4 py-2 bg-white border-b border-gray-200">
-      <div className="flex gap-2">
-        <button type="button" onClick={() => onToolChange('sticky')} className={toolButtonClass(activeTool === 'sticky')}>
-          Sticky-Note
+    <div className="flex flex-wrap items-center gap-2 px-4 py-2 bg-white border-b border-gray-200 min-h-[48px]">
+      {/* Creation tools */}
+      <div className="flex gap-1 flex-wrap">
+        <button type="button" onClick={() => onToolChange('sticky')} className={toolBtn(activeTool === 'sticky')}>
+          Sticky
         </button>
-        <button type="button" onClick={() => onToolChange('rect')} className={toolButtonClass(activeTool === 'rect')}>
-          Rectangle
+        <button type="button" onClick={() => onToolChange('rect')} className={toolBtn(activeTool === 'rect')}>
+          Rect
         </button>
-        <button type="button" onClick={() => onToolChange('circle')} className={toolButtonClass(activeTool === 'circle')}>
+        <button type="button" onClick={() => onToolChange('circle')} className={toolBtn(activeTool === 'circle')}>
           Circle
         </button>
-        <button type="button" onClick={() => onToolChange('line')} className={toolButtonClass(activeTool === 'line')}>
+        <button type="button" onClick={() => onToolChange('line')} className={toolBtn(activeTool === 'line')}>
           Arrow
         </button>
+        <button type="button" onClick={() => onToolChange('frame')} className={toolBtn(activeTool === 'frame')}>
+          Frame
+        </button>
+        <button type="button" onClick={() => onToolChange('text')} className={toolBtn(activeTool === 'text')}>
+          Text
+        </button>
+        <button type="button" onClick={() => onToolChange('connector')} className={toolBtn(activeTool === 'connector')}>
+          Connector
+        </button>
       </div>
+
+      {/* Separator */}
+      <div className="h-6 w-px bg-gray-200" />
+
+      {/* Selection actions */}
+      {hasSelection && (
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs text-gray-400 mr-1">
+            {selectedIds.length > 1 ? `${selectedIds.length} selected` : ''}
+          </span>
+          <button
+            type="button"
+            onClick={onDuplicate}
+            title="Duplicate (Ctrl+D)"
+            aria-label="Duplicate selected"
+            className="px-3 py-1.5 text-sm rounded-md border border-gray-200 bg-gray-100 hover:bg-gray-200 cursor-pointer focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 focus:outline-none"
+          >
+            Copy
+          </button>
+          <button
+            type="button"
+            onClick={onDelete}
+            title="Delete (Del)"
+            aria-label="Delete selected"
+            className="px-3 py-1.5 text-sm rounded-md border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 cursor-pointer focus-visible:ring-2 focus-visible:ring-red-400 focus-visible:ring-offset-1 focus:outline-none"
+          >
+            Delete
+          </button>
+        </div>
+      )}
+
+      {/* Color picker */}
       {selectedColorableId && (
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-gray-500">{selectedStickyId ? 'Sticky color:' : 'Color:'}</span>
-          {STICKY_COLORS.map((color) => (
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs text-gray-500">Color:</span>
+          {COLORS.map((color) => (
             <button
               key={color}
               type="button"
               onClick={() => onColorChange(color)}
-              className="w-7 h-7 rounded-md border-2 border-gray-800 cursor-pointer hover:opacity-90 transition-opacity"
+              aria-label={`Set color ${color}`}
+              className="w-6 h-6 rounded border-2 border-gray-400 cursor-pointer hover:opacity-90 transition-opacity focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 focus:outline-none"
               style={{ background: color }}
             />
           ))}
         </div>
       )}
-      {isResizable && selectedObject && (
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-gray-500">{isCircle ? 'Size:' : 'W × H:'}</span>
+
+      {/* Size controls (single selection only) */}
+      {isResizable && selectedObject && selectedIds.length === 1 && (
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs text-gray-500">{isCircle ? 'Size:' : 'W × H:'}</span>
           <input
             type="number"
             min={MIN_SIZE}
             max={MAX_SIZE}
+            aria-label={isCircle ? 'Size' : 'Width'}
             value={focusedInput === 'w' ? localWidth : Math.round(selectedObject.width)}
             onChange={(e) => setLocalWidth(e.target.value)}
             onFocus={() => setFocusedInput('w')}
             onBlur={commitWidth}
             onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
             onPointerDown={(e) => e.stopPropagation()}
-            className="w-14 px-1.5 py-1 text-sm border border-gray-200 rounded"
+            className="w-14 px-1.5 py-1 text-sm border border-gray-200 rounded focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 focus:outline-none"
           />
           {!isCircle && (
             <input
               type="number"
               min={MIN_SIZE}
               max={MAX_SIZE}
+              aria-label="Height"
               value={focusedInput === 'h' ? localHeight : Math.round(selectedObject.height)}
               onChange={(e) => setLocalHeight(e.target.value)}
               onFocus={() => setFocusedInput('h')}
               onBlur={commitHeight}
               onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
               onPointerDown={(e) => e.stopPropagation()}
-              className="w-14 px-1.5 py-1 text-sm border border-gray-200 rounded"
+              className="w-14 px-1.5 py-1 text-sm border border-gray-200 rounded focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 focus:outline-none"
             />
           )}
         </div>

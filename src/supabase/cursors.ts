@@ -1,4 +1,5 @@
 import { supabase } from './config'
+import { PRESENCE_TIMEOUT_MS } from '../constants'
 
 const TABLE = 'cursors'
 
@@ -79,10 +80,12 @@ export function subscribeCursors(
 ) {
   const db = requireSupabase()
   const fetchAndNotify = async () => {
+    const staleThreshold = new Date(Date.now() - PRESENCE_TIMEOUT_MS).toISOString()
     const { data, error } = await db
       .from(TABLE)
       .select('user_id, x, y, display_name, color')
       .eq('board_id', boardId)
+      .gte('updated_at', staleThreshold)
     if (error) {
       console.error('subscribeCursors error', error)
       callback({})

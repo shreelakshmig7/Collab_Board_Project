@@ -7,8 +7,7 @@ import BoardsListPage from './board/BoardsListPage'
 import BoardPage from './board/BoardPage'
 import { getBoard } from './supabase/boards'
 import { upsertPresence, removePresence, subscribePresence } from './supabase/presence'
-
-const HEARTBEAT_MS = 25_000
+import { HEARTBEAT_MS } from './constants'
 
 function BoardPageWrapper({ user, presenceNames }: { user: AppUser; presenceNames: string[] }) {
   const { boardId } = useParams<{ boardId: string }>()
@@ -95,7 +94,11 @@ export default function App() {
   }, [user?.uid, user?.displayName])
 
   if (loading) {
-    return <div style={{ padding: 24 }}>Loading...</div>
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <p className="text-gray-500">Loading…</p>
+      </div>
+    )
   }
 
   if (!user) {

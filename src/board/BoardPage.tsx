@@ -5,13 +5,15 @@ import TopBar from './TopBar'
 import Toolbar from './Toolbar'
 import type { Tool } from './Toolbar'
 import Canvas from '../canvas/Canvas'
-import { subscribeObjects, updateObject, deleteObject, deleteAllObjects } from '../supabase/objects'
+import { subscribeObjects, updateObject, deleteObject, deleteAllObjects, addObject } from '../supabase/objects'
 import { removeAllCursorsForUser } from '../supabase/cursors'
+import { subscribeDragMoves, sendDragMove } from '../supabase/dragBroadcast'
+import type { RealtimeChannel } from '@supabase/supabase-js'
 import { signOut } from '../supabase/auth'
 import type { BoardObject } from '../types/board'
 import { runAICommand } from '../ai/claudeAgent'
+import { DEFAULT_CONNECTOR_COLOR } from '../constants'
 
-/** Gemini-style star/sparkle icon (inline SVG) */
 function GeminiIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden>
@@ -26,7 +28,7 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
   const navigate = useNavigate()
   const [activeTool, setActiveTool] = useState<Tool>('sticky')
   const [objects, setObjects] = useState<BoardObject[]>([])
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingText, setEditingText] = useState('')
   const [showAIPanel, setShowAIPanel] = useState(false)
@@ -35,40 +37,81 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
   const [aiLoading, setAiLoading] = useState(false)
   const [aiError, setAiError] = useState<string | null>(null)
   const [createError, setCreateError] = useState<string | null>(null)
-  const [showComingSoon, setShowComingSoon] = useState(false)
+
+  // Clipboard for copy/paste
+  const clipboardRef = useRef<BoardObject[]>([])
+  // Drag start positions for multi-drag
+  const dragStartPositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map())
 
   const handleOptimisticAdd = useCallback((obj: BoardObject) => {
     setObjects((prev) => [...prev, obj])
     setCreateError(null)
   }, [])
-  const handleAddFailed = useCallback((id: string, err: unknown) => {
+
+  const handleAddFailed = useCallback((id: string, addErr: unknown) => {
     setObjects((prev) => prev.filter((o) => o.id !== id))
-    setCreateError(err instanceof Error ? err.message : String(err))
+    setCreateError(addErr instanceof Error ? addErr.message : String(addErr))
   }, [])
 
   const handleObjectMoved = useCallback((id: string, x: number, y: number) => {
     setObjects((prev) => prev.map((o) => (o.id === id ? { ...o, x, y } : o)))
   }, [])
 
-  const handleDragStart = useCallback((id: string) => {
-    draggingIdRef.current = id
-  }, [])
+  const handleDragStart = useCallback(
+    (id: string) => {
+      draggingIdRef.current = id
+      // Store start positions for all selected objects (for multi-drag)
+      if (selectedIds.includes(id) && selectedIds.length > 1) {
+        setObjects((prev) => {
+          const positions = new Map<string, { x: number; y: number }>()
+          for (const obj of prev) {
+            if (selectedIds.includes(obj.id)) {
+              positions.set(obj.id, { x: obj.x, y: obj.y })
+            }
+          }
+          dragStartPositionsRef.current = positions
+          return prev
+        })
+      }
+    },
+    [selectedIds]
+  )
+
   const handleDragEnd = useCallback(() => {
     draggingIdRef.current = null
+    dragStartPositionsRef.current = new Map()
   }, [])
+
+  /** Called during multi-drag: move all other selected objects by the same delta as the dragged one */
+  const handleMultiDragMove = useCallback(
+    (movedId: string, deltaX: number, deltaY: number) => {
+      if (selectedIds.length <= 1) return
+      setObjects((prev) =>
+        prev.map((o) => {
+          if (o.id === movedId) return o // Konva handles this one
+          if (!selectedIds.includes(o.id)) return o
+          const start = dragStartPositionsRef.current.get(o.id)
+          if (!start) return o
+          return { ...o, x: start.x + deltaX, y: start.y + deltaY }
+        })
+      )
+    },
+    [selectedIds]
+  )
 
   const lastLocalResizeRef = useRef<{ id: string; t: number }>({ id: '', t: 0 })
   const draggingIdRef = useRef<string | null>(null)
+  const dragChannelRef = useRef<RealtimeChannel | null>(null)
 
   const handleObjectResized = useCallback(
-    (id: string, payload: { x: number; y: number; width: number; height: number }) => {
-      const { x, y, width, height } = payload
+    (id: string, payload: { x: number; y: number; width: number; height: number; rotation?: number }) => {
+      const { x, y, width, height, rotation } = payload
       lastLocalResizeRef.current = { id, t: Date.now() }
       setObjects((prev) =>
-        prev.map((o) => (o.id === id ? { ...o, x, y, width, height } : o))
+        prev.map((o) => (o.id === id ? { ...o, x, y, width, height, rotation: rotation ?? o.rotation } : o))
       )
-      updateObject(boardId, id, { x, y, width, height }).catch((err) =>
-        console.error('Failed to update object size', err)
+      updateObject(boardId, id, { x, y, width, height, ...(rotation !== undefined ? { rotation } : {}) }).catch(
+        (err: unknown) => console.error('Failed to update object size/rotation', err)
       )
     },
     [boardId]
@@ -114,30 +157,135 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
   )
 
   useEffect(() => {
-    setSelectedId(null)
+    setSelectedIds([])
   }, [boardId])
 
   useEffect(() => {
-    const unsub = subscribeObjects(
-      boardId,
-      setObjectsFromSubscription,
-      handleRealtimeObjectChange
-    )
+    const unsub = subscribeObjects(boardId, setObjectsFromSubscription, handleRealtimeObjectChange)
     return unsub
   }, [boardId, setObjectsFromSubscription, handleRealtimeObjectChange])
 
   useEffect(() => {
+    const result = subscribeDragMoves(boardId, ({ userId, objectId, x, y }) => {
+      if (userId === user.uid) return
+      setObjects((prev) => prev.map((o) => (o.id === objectId ? { ...o, x, y } : o)))
+    })
+    if (!result) return
+    const [channel, unsubscribe] = result
+    dragChannelRef.current = channel
+    return () => {
+      unsubscribe()
+      dragChannelRef.current = null
+    }
+  }, [boardId, user.uid])
+
+  const handleBroadcastDragMove = useCallback(
+    (id: string, x: number, y: number) => {
+      if (!dragChannelRef.current) return
+      sendDragMove(dragChannelRef.current, { userId: user.uid, objectId: id, x, y })
+    },
+    [user.uid]
+  )
+
+  /** Duplicate all selected objects with a slight position offset */
+  const handleDuplicate = useCallback(() => {
+    if (selectedIds.length === 0) return
+    const toDuplicate = objects.filter((o) => selectedIds.includes(o.id))
+    const newIds: string[] = []
+    for (const obj of toDuplicate) {
+      const newId = crypto.randomUUID()
+      newIds.push(newId)
+      const newObj: BoardObject = { ...obj, id: newId, x: obj.x + 20, y: obj.y + 20 }
+      setObjects((prev) => [...prev, newObj])
+      addObject(boardId, newObj).catch((err: unknown) => {
+        console.error('Failed to duplicate object', err)
+        setObjects((prev) => prev.filter((o) => o.id !== newId))
+      })
+    }
+    setSelectedIds(newIds)
+  }, [boardId, objects, selectedIds])
+
+  const handleDeleteSelected = useCallback(() => {
+    if (selectedIds.length === 0) return
+    const idsToDelete = [...selectedIds]
+    setSelectedIds([])
+    setObjects((prev) => prev.filter((o) => !idsToDelete.includes(o.id)))
+    for (const id of idsToDelete) {
+      deleteObject(boardId, id).catch((err: unknown) => console.error('Failed to delete object', err))
+    }
+  }, [boardId, selectedIds])
+
+  /** Handle connector creation between two objects */
+  const handleConnectorCreated = useCallback(
+    (fromId: string, toId: string) => {
+      const id = crypto.randomUUID()
+      const connector: BoardObject = {
+        id,
+        type: 'connector',
+        from_id: fromId,
+        to_id: toId,
+        style: 'arrow',
+        color: DEFAULT_CONNECTOR_COLOR,
+        x: 0,
+        y: 0,
+        width: 0,
+        height: 0,
+      }
+      setObjects((prev) => [...prev, connector])
+      addObject(boardId, connector).catch((err: unknown) => {
+        console.error('Failed to create connector', err)
+        setObjects((prev) => prev.filter((o) => o.id !== id))
+      })
+    },
+    [boardId]
+  )
+
+  useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (editingId) return
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
+      const isTyping = () => {
+        const el = document.activeElement
+        if (!el || !(el instanceof HTMLElement)) return false
+        const tag = el.tagName.toLowerCase()
+        return tag === 'input' || tag === 'textarea' || el.isContentEditable
+      }
+      if (isTyping()) return
+
+      const isMac = navigator.platform.toUpperCase().includes('MAC')
+      const ctrl = isMac ? e.metaKey : e.ctrlKey
+
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedIds.length > 0) {
         e.preventDefault()
-        deleteObject(boardId, selectedId)
-        setSelectedId(null)
+        handleDeleteSelected()
+      } else if (ctrl && e.key === 'd') {
+        e.preventDefault()
+        handleDuplicate()
+      } else if (ctrl && e.key === 'c') {
+        e.preventDefault()
+        clipboardRef.current = objects.filter((o) => selectedIds.includes(o.id))
+      } else if (ctrl && e.key === 'v') {
+        e.preventDefault()
+        const clipboard = clipboardRef.current
+        if (clipboard.length === 0) return
+        const newIds: string[] = []
+        for (const obj of clipboard) {
+          const newId = crypto.randomUUID()
+          newIds.push(newId)
+          const newObj: BoardObject = { ...obj, id: newId, x: obj.x + 30, y: obj.y + 30 }
+          setObjects((prev) => [...prev, newObj])
+          addObject(boardId, newObj).catch((err: unknown) => {
+            console.error('Failed to paste object', err)
+            setObjects((prev) => prev.filter((o) => o.id !== newId))
+          })
+        }
+        // Update clipboard positions so repeated paste keeps offsetting
+        clipboardRef.current = clipboard.map((o) => ({ ...o, x: o.x + 30, y: o.y + 30 }))
+        setSelectedIds(newIds)
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [boardId, selectedId, editingId])
+  }, [boardId, selectedIds, editingId, objects, handleDeleteSelected, handleDuplicate])
 
   const handleStartEditText = useCallback((id: string, text: string) => {
     setEditingId(id)
@@ -156,8 +304,8 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
     setEditingId(null)
     setEditingText('')
     setObjects((prev) => prev.map((o) => (o.id === id ? { ...o, text: newText } : o)))
-    updateObject(boardId, id, { text: newText }).catch((err) => {
-      console.error('Failed to save sticky text', err)
+    updateObject(boardId, id, { text: newText }).catch((err: unknown) => {
+      console.error('Failed to save text', err)
       setObjects((prev) => prev.map((o) => (o.id === id ? { ...o, text: previousText } : o)))
     })
   }, [boardId, editingId, editingText, objects])
@@ -167,44 +315,38 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
     setEditingText('')
   }, [])
 
-  const selectedObject = objects.find((o) => o.id === selectedId)
-  const selectedStickyId = selectedObject?.type === 'sticky' ? selectedId : null
-  const editingObject = editingId ? objects.find((o) => o.id === editingId) ?? null : null
+  const selectedObject =
+    selectedIds.length === 1 ? (objects.find((o) => o.id === selectedIds[0]) ?? null) : null
+
   const selectedColorableId =
     selectedObject &&
-    (selectedObject.type === 'sticky' ||
-      selectedObject.type === 'rect' ||
-      selectedObject.type === 'circle' ||
-      selectedObject.type === 'line')
-      ? selectedId
+    ['sticky', 'rect', 'circle', 'line', 'frame', 'connector', 'text'].includes(selectedObject.type)
+      ? selectedIds[0]
       : null
 
   const handleColorChange = useCallback(
     (color: string) => {
-      if (!selectedColorableId) return
-      setObjects((prev) =>
-        prev.map((o) => (o.id === selectedColorableId ? { ...o, color } : o))
-      )
-      updateObject(boardId, selectedColorableId, { color }).catch((err) =>
+      // Apply to all selected objects
+    for (const id of selectedIds) {
+      setObjects((prev) => prev.map((o) => (o.id === id ? { ...o, color } : o)))
+      updateObject(boardId, id, { color }).catch((err: unknown) =>
         console.error('Failed to update color', err)
       )
+    }
     },
-    [boardId, selectedColorableId]
+    [boardId, selectedIds]
   )
 
   const handleResize = useCallback(
     (width: number, height: number) => {
-      if (!selectedId) return
-      setObjects((prev) =>
-        prev.map((o) =>
-          o.id === selectedId ? { ...o, width, height } : o
-        )
-      )
-      updateObject(boardId, selectedId, { width, height }).catch((err) =>
+      if (!selectedIds[0]) return
+      const id = selectedIds[0]
+      setObjects((prev) => prev.map((o) => (o.id === id ? { ...o, width, height } : o)))
+      updateObject(boardId, id, { width, height }).catch((err: unknown) =>
         console.error('Failed to resize', err)
       )
     },
-    [boardId, selectedId]
+    [boardId, selectedIds]
   )
 
   const handleSignOut = useCallback(() => {
@@ -213,20 +355,14 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
   }, [user.uid])
 
   const handleClearBoard = useCallback(() => {
-    deleteAllObjects(boardId).then(() => setObjects([])).catch((err) =>
-      console.error('Failed to clear board', err)
-    )
+    deleteAllObjects(boardId)
+      .then(() => setObjects([]))
+      .catch((err: unknown) => console.error('Failed to clear board', err))
   }, [boardId])
 
   const handleBackToBoards = useCallback(() => {
     navigate('/')
   }, [navigate])
-
-  useEffect(() => {
-    if (!showComingSoon) return
-    const t = setTimeout(() => setShowComingSoon(false), 2500)
-    return () => clearTimeout(t)
-  }, [showComingSoon])
 
   const handleRunAI = useCallback(async () => {
     const prompt = aiPrompt.trim()
@@ -238,12 +374,14 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
       const result = await runAICommand(prompt, objects, boardId)
       setAiResult(result.text)
       if (result.error) setAiError(result.error)
-    } catch (err) {
+    } catch (err: unknown) {
       setAiError(err instanceof Error ? err.message : String(err))
     } finally {
       setAiLoading(false)
     }
-  }, [aiPrompt, objects])
+  }, [aiPrompt, objects, boardId])
+
+  const editingObject = editingId ? (objects.find((o) => o.id === editingId) ?? null) : null
 
   return (
     <div className="flex flex-col h-full">
@@ -257,25 +395,27 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
       <Toolbar
         activeTool={activeTool}
         onToolChange={setActiveTool}
-        selectedStickyId={selectedStickyId}
+        selectedIds={selectedIds}
+        selectedObject={selectedObject}
         selectedColorableId={selectedColorableId}
-        selectedObject={selectedObject ?? null}
         onColorChange={handleColorChange}
         onResize={handleResize}
+        onDuplicate={handleDuplicate}
+        onDelete={handleDeleteSelected}
       />
       {createError && (
-        <div className="px-3 py-2 bg-red-50 text-red-700 text-sm">
-          Could not create object: {createError}
+        <div className="px-3 py-2 bg-red-50 text-red-700 text-sm" role="alert">
+          Could not create object: {createError}. Try again or check your connection.
         </div>
       )}
-      <div className="flex-1 min-h-0">
+      <div id="main-content" className="flex-1 min-h-0">
         <Canvas
           boardId={boardId}
           user={user}
           activeTool={activeTool}
           objects={objects}
-          selectedId={selectedId}
-          onSelect={setSelectedId}
+          selectedIds={selectedIds}
+          onSelect={setSelectedIds}
           onStartEditText={handleStartEditText}
           editingObject={editingObject}
           editingText={editingText}
@@ -289,54 +429,41 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
           onAfterCreateObject={() => setActiveTool('pan')}
+          onBroadcastDragMove={handleBroadcastDragMove}
+          onMultiDragMove={handleMultiDragMove}
+          onConnectorCreated={handleConnectorCreated}
         />
       </div>
-      {/* AI button fixed bottom-right */}
-      <div className="fixed right-6 bottom-6 z-40">
-        <button
-          type="button"
-          onClick={() => setShowComingSoon(true)}
-          className="flex items-center justify-center w-12 h-12 rounded-xl bg-gradient-to-br from-violet-100 to-indigo-100 text-violet-600 hover:from-violet-200 hover:to-indigo-200 active:scale-95 transition-all duration-200 shadow-lg border border-violet-200/60"
-          title="AI (coming soon)"
-          aria-label="AI – coming soon"
-        >
-          <GeminiIcon className="w-6 h-6" />
-        </button>
-        {showComingSoon && (
-          <div
-            role="tooltip"
-            className="absolute right-0 bottom-full mb-2 px-4 py-2.5 bg-gray-900 text-white text-sm font-medium rounded-2xl shadow-lg whitespace-nowrap"
-            style={{ boxShadow: '0 10px 40px -10px rgba(0,0,0,0.25)' }}
-          >
-            Coming soon!!
-            <span className="absolute right-6 top-full border-8 border-transparent border-t-gray-900" style={{ marginTop: '-1px' }} />
-          </div>
-        )}
-      </div>
 
+      {/* AI panel */}
       {showAIPanel && (
-        <div className="px-4 py-3 bg-violet-50 border-b border-violet-200 flex flex-wrap items-center gap-3">
+        <div className="px-4 py-3 bg-violet-50 border-t border-violet-200 flex flex-wrap items-center gap-3">
+          <label htmlFor="ai-prompt-input" className="sr-only">
+            AI command
+          </label>
           <input
+            id="ai-prompt-input"
             type="text"
-            placeholder="e.g. Add a yellow sticky that says Hello"
+            placeholder='e.g. "Create a SWOT analysis" or "Add a yellow sticky that says Hello"'
+            autoComplete="off"
             value={aiPrompt}
             onChange={(e) => setAiPrompt(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleRunAI()}
             disabled={aiLoading}
-            className="flex-1 min-w-[200px] px-3 py-2 text-sm border border-violet-300 rounded-md"
+            className="flex-1 min-w-[240px] px-3 py-2 text-sm border border-violet-300 rounded-md focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-1 focus:outline-none"
           />
           <button
             type="button"
             onClick={handleRunAI}
             disabled={aiLoading}
-            className="px-4 py-2 text-sm cursor-pointer bg-violet-700 text-white border-0 rounded-md disabled:opacity-70 disabled:cursor-wait hover:bg-violet-800"
+            className="px-4 py-2 text-sm cursor-pointer bg-violet-700 text-white border-0 rounded-md disabled:opacity-70 disabled:cursor-wait hover:bg-violet-800 focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 focus:outline-none"
           >
             {aiLoading ? 'Running…' : 'Run'}
           </button>
           <button
             type="button"
             onClick={() => setShowAIPanel(false)}
-            className="px-3 py-2 text-sm cursor-pointer hover:bg-violet-100 rounded-md"
+            className="px-3 py-2 text-sm cursor-pointer hover:bg-violet-100 rounded-md focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 focus:outline-none"
           >
             Close
           </button>
@@ -347,6 +474,19 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
           )}
         </div>
       )}
+
+      {/* AI button fixed bottom-right */}
+      <div className="fixed right-6 bottom-6 z-40">
+        <button
+          type="button"
+          onClick={() => setShowAIPanel((v) => !v)}
+          className="flex items-center justify-center w-12 h-12 rounded-xl bg-gradient-to-br from-violet-100 to-indigo-100 text-violet-600 hover:from-violet-200 hover:to-indigo-200 active:scale-95 transition-colors duration-200 shadow-lg border border-violet-200/60 focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2"
+          aria-label={showAIPanel ? 'Close AI panel' : 'Open AI panel'}
+          aria-expanded={showAIPanel}
+        >
+          <GeminiIcon className="w-6 h-6" />
+        </button>
+      </div>
     </div>
   )
 }

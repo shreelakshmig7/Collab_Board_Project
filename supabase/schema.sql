@@ -74,6 +74,29 @@ CREATE TABLE IF NOT EXISTS cursors (
   PRIMARY KEY (board_id, user_id)
 );
 
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Stale-presence cleanup
+-- Deletes any presence row whose last_seen_at is older than 2 minutes.
+-- The client heartbeat fires every 25 s, so 2 min is a generous safety margin.
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION prune_stale_presence()
+RETURNS void
+LANGUAGE sql
+SECURITY DEFINER
+AS $$
+  DELETE FROM presence WHERE last_seen_at < NOW() - INTERVAL '2 minutes';
+  DELETE FROM cursors   WHERE updated_at   < NOW() - INTERVAL '2 minutes';
+$$;
+
+-- Schedule the cleanup every minute via pg_cron (enable the pg_cron extension in
+-- Supabase Dashboard → Database → Extensions first, then run):
+--
+--   SELECT cron.schedule('prune-stale-presence', '* * * * *', 'SELECT prune_stale_presence()');
+--
+-- Without pg_cron the client-side updated_at / last_seen_at filters in
+-- subscribeCursors() and subscribePresence() are the primary guard;
+-- this job only keeps the tables tidy.
+
 -- Enable Realtime: In Supabase Dashboard go to Database → Replication,
 -- find supabase_realtime and add board_objects, cursors, and presence to the publication.
 
@@ -86,3 +109,25 @@ CREATE POLICY "Allow authenticated read/write board_objects"
 
 CREATE POLICY "Allow authenticated read/write cursors"
   ON cursors FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Schema migrations: new columns for extended object types
+-- Run these in Supabase SQL Editor if upgrading from the original schema.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+-- Rotation in degrees (for all object types)
+ALTER TABLE board_objects ADD COLUMN IF NOT EXISTS rotation DOUBLE PRECISION DEFAULT 0;
+
+-- Parent frame id (for objects contained inside a frame)
+ALTER TABLE board_objects ADD COLUMN IF NOT EXISTS parent_id TEXT;
+
+-- Connector endpoints
+ALTER TABLE board_objects ADD COLUMN IF NOT EXISTS from_id TEXT;
+ALTER TABLE board_objects ADD COLUMN IF NOT EXISTS to_id TEXT;
+
+-- Connector/line style: 'line' | 'arrow'
+ALTER TABLE board_objects ADD COLUMN IF NOT EXISTS style TEXT;
+
+-- Standalone text element properties
+ALTER TABLE board_objects ADD COLUMN IF NOT EXISTS font_size DOUBLE PRECISION;
+ALTER TABLE board_objects ADD COLUMN IF NOT EXISTS font_color TEXT;

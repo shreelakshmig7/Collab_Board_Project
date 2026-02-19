@@ -1,0 +1,119 @@
+---
+description: 
+globs: src/**/*.test.{ts, tsx}
+alwaysApply: false
+---
+
+# Test Patterns — CollabBoard
+
+Reference patterns for each code category. Follow these when writing tests.
+
+## React Component (`*.test.tsx`)
+
+```tsx
+import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import TopBar from './TopBar'
+
+describe('TopBar', () => {
+  it('shows online count', () => {
+    render(<TopBar presenceNames={['You', 'Alice']} />)
+    expect(screen.getByText('Online (2)')).toBeInTheDocument()
+  })
+
+  it('calls onSignOut when Sign out is clicked', async () => {
+    const onSignOut = vi.fn()
+    render(<TopBar presenceNames={['You']} onSignOut={onSignOut} />)
+    await userEvent.click(screen.getByRole('button', { name: /sign out/i }))
+    expect(onSignOut).toHaveBeenCalledOnce()
+  })
+})
+```
+
+## Supabase Module (`*.test.ts`) — mock the client
+
+```ts
+import { vi, describe, it, expect, beforeEach } from 'vitest'
+
+// Mock before importing the module under test
+vi.mock('./config', () => ({
+  supabase: {
+    from: vi.fn().mockReturnThis(),
+    select: vi.fn().mockReturnThis(),
+    eq: vi.fn().mockReturnThis(),
+    upsert: vi.fn().mockResolvedValue({ error: null }),
+    delete: vi.fn().mockResolvedValue({ error: null }),
+  },
+}))
+
+import { upsertPresence } from './presence'
+
+describe('upsertPresence', () => {
+  it('upserts with correct user_id', async () => {
+    await upsertPresence('uid-1', 'Alice')
+    const { supabase } = await import('./config')
+    expect(supabase!.from).toHaveBeenCalledWith('presence')
+  })
+})
+```
+
+## AI Agent / Tool Calls (`*.test.ts`) — mock Anthropic SDK
+
+```ts
+vi.mock('@anthropic-ai/sdk', () => ({
+  default: class {
+    messages = {
+      create: vi.fn().mockResolvedValue({
+        content: [{ type: 'text', text: 'Done' }],
+        stop_reason: 'end_turn',
+      }),
+    }
+  },
+}))
+
+import { runAICommand } from './claudeAgent'
+
+describe('runAICommand', () => {
+  it('returns text response', async () => {
+    const result = await runAICommand('Add a sticky', [], 'board-1')
+    expect(result.text).toBe('Done')
+  })
+})
+```
+
+## Pure Utility / Logic
+
+```ts
+import { cursorColorFromUid } from '../supabase/cursors'
+
+describe('cursorColorFromUid', () => {
+  it('always returns a hex colour', () => {
+    expect(cursorColorFromUid('abc')).toMatch(/^#[0-9a-f]{6}$/i)
+  })
+
+  it('is deterministic', () => {
+    expect(cursorColorFromUid('uid-1')).toBe(cursorColorFromUid('uid-1'))
+  })
+})
+```
+
+## Canvas / Konva Logic
+
+Test the **data and logic**, not Konva render. Mock `react-konva`:
+
+```ts
+vi.mock('react-konva', () => ({
+  Group: ({ children }: React.PropsWithChildren) => <>{children}</>,
+  Rect: () => null,
+  Text: () => null,
+  // ...
+}))
+```
+
+Then test prop-driven behaviour (selection state, drag callbacks) via RTL.
+
+## What NOT to test
+
+- Tailwind class names
+- Exact pixel positions of Konva nodes
+- Supabase internals (test your module's public API, not the client itself)

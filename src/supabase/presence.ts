@@ -1,4 +1,5 @@
 import { supabase } from './config'
+import { PRESENCE_TIMEOUT_MS } from '../constants'
 
 const TABLE = 'presence'
 
@@ -46,9 +47,11 @@ export function subscribePresence(
 ): () => void {
   const db = requireSupabase()
   const fetchAndNotify = async () => {
+    const staleThreshold = new Date(Date.now() - PRESENCE_TIMEOUT_MS).toISOString()
     const { data, error } = await db
       .from(TABLE)
       .select('user_id, display_name')
+      .gte('last_seen_at', staleThreshold)
     if (error) {
       console.error('subscribePresence error', error)
       callback([])

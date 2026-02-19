@@ -10,23 +10,40 @@ function requireSupabase() {
 
 const REFETCH_DEBOUNCE_MS = 2000
 
-export type RealtimeObjectChange =
-  | { event: 'INSERT' | 'UPDATE'; new: BoardObject }
-  | { event: 'DELETE'; old: { id: string } }
+const ALL_COLUMNS =
+  'id, type, x, y, width, height, text, color, rotation, parent_id, from_id, to_id, style, font_size, font_color'
+
+const VALID_TYPES: BoardObject['type'][] = [
+  'sticky', 'rect', 'circle', 'line', 'frame', 'connector', 'text',
+]
 
 function rowToBoardObject(row: Record<string, unknown>): BoardObject {
-  const type = String(row.type)
+  const rawType = String(row.type)
+  const objType: BoardObject['type'] = VALID_TYPES.includes(rawType as BoardObject['type'])
+    ? (rawType as BoardObject['type'])
+    : 'sticky'
   return {
     id: String(row.id),
-    type: type === 'sticky' || type === 'rect' || type === 'circle' || type === 'line' ? type : 'sticky',
+    type: objType,
     x: Number(row.x),
     y: Number(row.y),
     width: Number(row.width),
     height: Number(row.height),
     text: row.text != null ? String(row.text) : undefined,
     color: row.color != null ? String(row.color) : undefined,
+    rotation: row.rotation != null ? Number(row.rotation) : undefined,
+    parent_id: row.parent_id != null ? String(row.parent_id) : undefined,
+    from_id: row.from_id != null ? String(row.from_id) : undefined,
+    to_id: row.to_id != null ? String(row.to_id) : undefined,
+    style: row.style != null ? String(row.style) : undefined,
+    font_size: row.font_size != null ? Number(row.font_size) : undefined,
+    font_color: row.font_color != null ? String(row.font_color) : undefined,
   }
 }
+
+export type RealtimeObjectChange =
+  | { event: 'INSERT' | 'UPDATE'; new: BoardObject }
+  | { event: 'DELETE'; old: { id: string } }
 
 export function subscribeObjects(
   boardId: string,
@@ -37,13 +54,13 @@ export function subscribeObjects(
   const fetchAndNotify = async () => {
     const { data, error } = await db
       .from(TABLE)
-      .select('id, type, x, y, width, height, text, color')
+      .select(ALL_COLUMNS)
       .eq('board_id', boardId)
     if (error) {
       console.error('subscribeObjects error', error)
       return
     }
-    callback((data ?? []).map((row) => ({ ...row, id: row.id } as BoardObject)))
+    callback((data ?? []).map((row) => rowToBoardObject(row as Record<string, unknown>)))
   }
   fetchAndNotify()
   let refetchTimer: ReturnType<typeof setTimeout> | null = null
@@ -85,10 +102,10 @@ export function subscribeObjects(
 export async function getObjects(boardId: string): Promise<BoardObject[]> {
   const { data, error } = await requireSupabase()
     .from(TABLE)
-    .select('id, type, x, y, width, height, text, color')
+    .select(ALL_COLUMNS)
     .eq('board_id', boardId)
   if (error) throw error
-  return (data ?? []).map((row) => ({ ...row, id: row.id } as BoardObject))
+  return (data ?? []).map((row) => rowToBoardObject(row as Record<string, unknown>))
 }
 
 export async function addObject(boardId: string, obj: BoardObject): Promise<void> {
@@ -102,6 +119,13 @@ export async function addObject(boardId: string, obj: BoardObject): Promise<void
     height: obj.height,
     text: obj.text ?? null,
     color: obj.color ?? null,
+    rotation: obj.rotation ?? 0,
+    parent_id: obj.parent_id ?? null,
+    from_id: obj.from_id ?? null,
+    to_id: obj.to_id ?? null,
+    style: obj.style ?? null,
+    font_size: obj.font_size ?? null,
+    font_color: obj.font_color ?? null,
     updated_at: new Date().toISOString(),
   })
   if (error) throw error
@@ -119,6 +143,13 @@ export async function updateObject(
   if (partial.height !== undefined) row.height = partial.height
   if (partial.text !== undefined) row.text = partial.text
   if (partial.color !== undefined) row.color = partial.color
+  if (partial.rotation !== undefined) row.rotation = partial.rotation
+  if (partial.parent_id !== undefined) row.parent_id = partial.parent_id
+  if (partial.from_id !== undefined) row.from_id = partial.from_id
+  if (partial.to_id !== undefined) row.to_id = partial.to_id
+  if (partial.style !== undefined) row.style = partial.style
+  if (partial.font_size !== undefined) row.font_size = partial.font_size
+  if (partial.font_color !== undefined) row.font_color = partial.font_color
   const { error } = await requireSupabase()
     .from(TABLE)
     .update(row)

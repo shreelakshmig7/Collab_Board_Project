@@ -1,0 +1,67 @@
+---
+description: 
+alwaysApply: true
+---
+
+# CollabBoard — Coding Standards & Conventions
+
+Builds on `tdd-workflow`. Follow these when writing or editing code.
+
+## Naming Conventions
+
+| Kind | Convention | Example |
+|---|---|---|
+| React components | PascalCase | `BoardPage.tsx`, `TopBar.tsx` |
+| Functions / variables | camelCase | `subscribeObjects`, `boardId` |
+| Types / interfaces | PascalCase | `BoardObject`, `AppUser` |
+| Constants | UPPER_SNAKE | `HEARTBEAT_MS`, `REFETCH_DEBOUNCE_MS` |
+| Test files | `*.test.ts` / `*.test.tsx` | `presence.test.ts`, `TopBar.test.tsx` |
+
+## Error Handling
+
+- **Do not swallow errors.** Log and rethrow or handle explicitly.
+- Use `cancelled` or `abort` flags in async effects to avoid state updates after unmount.
+
+```ts
+// ❌ BAD
+.catch(() => {})
+
+// ✅ GOOD
+.catch((err) => {
+  console.error('subscribeObjects error', err)
+  return
+})
+// or for propagating:
+throw new DataFetchError('Unable to retrieve board', { cause: err })
+```
+
+- In `useEffect` cleanup, set `cancelled = true` before async work completes to avoid stale updates.
+
+## Architecture
+
+- **Feature-based folders:** `auth/`, `board/`, `canvas/`, `ai/`, `supabase/`
+- **Types:** Shared types live in `src/types/` (e.g. `board.ts`, `user.ts`)
+- **Colocated tests:** Next to source — `Bar.tsx` → `Bar.test.tsx`
+- **One concern per module:** Avoid god files; split by responsibility
+
+## Stack Usage
+
+| Use | Avoid |
+|-----|----|
+| React functional components + hooks | Class components |
+| `react-konva` for canvas | Raw canvas or PixiJS (Pre-Search trade-off) |
+| Supabase for DB sync (Firestore/RTDB per docs) | Custom WebSockets for sync |
+| Vitest + Testing Library | Jest |
+| Tailwind for UI | Inline styles except when necessary (e.g. Konva) |
+| TypeScript strict mode | `any` without justification |
+
+## Workflow
+
+- **TDD:** See `tdd-workflow` — tests first, then implementation.
+- **Commits:** Small, focused commits. Message format: `feat: add X` / `fix: Y` / `test: Z`.
+- **PRs:** Must include tests for new behaviour; `npm test` green before merge.
+
+## Non-Negotiables
+
+- Mock external I/O in tests (Supabase, APIs, `window`)
+- Keep rules and docs under ~50 lines; prefer actionable examples

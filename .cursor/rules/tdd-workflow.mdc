@@ -1,0 +1,65 @@
+---
+description: TDD is the primary development method for CollabBoard. Write a failing test before writing any implementation code.
+alwaysApply: true
+---
+
+# Test-Driven Development (TDD) — CollabBoard
+
+TDD is **mandatory** for all new code in this project. No production code is written before a failing test exists for it.
+
+## The Cycle (Red → Green → Refactor)
+
+1. **Red** — Write the smallest test that describes the behaviour you want. Run it; confirm it fails for the right reason.
+2. **Green** — Write the minimum production code to make the test pass. No more.
+3. **Refactor** — Clean up code and tests while keeping all tests green.
+
+## Test Stack
+
+Install once and keep in `devDependencies`:
+
+```bash
+npm install -D vitest @vitest/ui jsdom \
+  @testing-library/react @testing-library/user-event @testing-library/jest-dom \
+  msw
+```
+
+Add to `vite.config.ts`:
+```ts
+test: {
+  environment: 'jsdom',
+  globals: true,
+  setupFiles: ['./src/test/setup.ts'],
+}
+```
+
+`src/test/setup.ts`:
+```ts
+import '@testing-library/jest-dom'
+```
+
+## File Naming & Location
+
+| Source file | Test file |
+|---|---|
+| `src/foo/Bar.tsx` | `src/foo/Bar.test.tsx` |
+| `src/supabase/objects.ts` | `src/supabase/objects.test.ts` |
+| `src/ai/claudeAgent.ts` | `src/ai/claudeAgent.test.ts` |
+
+Tests live **next to** the file they cover (colocated), not in a separate `__tests__` folder.
+
+## Scope by Code Type
+
+| Code type | What to test |
+|---|---|
+| **React component** | Render output, user interactions, prop edge cases |
+| **Supabase module** | Happy path + error path; mock the Supabase client via `msw` or `vi.mock` |
+| **AI agent / tool calls** | Input → tool schema validation; mock the Anthropic SDK |
+| **Utility / pure function** | All branches, boundary values |
+| **Canvas / Konva** | Logic only (object creation, position math); skip Konva render calls |
+
+## Non-Negotiables
+
+- A PR (or commit) that adds a feature **must** include the test written first.
+- Tests must be **independent** — no shared mutable state between tests.
+- Mock all external I/O (Supabase, Anthropic API, `window`).
+- `npm test` must be green before any push.

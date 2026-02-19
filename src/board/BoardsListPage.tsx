@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import type { AppUser } from '../types/user'
 import { listBoards, createBoard, deleteBoard, updateBoard } from '../supabase/boards'
 import type { Board } from '../supabase/boards'
@@ -60,10 +60,6 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
     } finally {
       setCreating(false)
     }
-  }
-
-  const handleOpenBoard = (id: string) => {
-    navigate(`/board/${id}`)
   }
 
   const selectedBoard = selectedBoardId ? boards.find((b) => b.id === selectedBoardId) : null
@@ -138,7 +134,7 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
       <TopBar presenceNames={presenceNames} onSignOut={() => { removeAllCursorsForUser(user.uid); signOut() }} />
-      <main className="max-w-2xl mx-auto px-6 py-12 flex-1 w-full">
+      <main id="main-content" className="max-w-2xl mx-auto px-6 py-12 flex-1 w-full">
         <h1 className="text-2xl font-semibold text-gray-800 mb-8">My Boards</h1>
         {error && (
           <div className="mb-6 p-4 bg-red-50 text-red-700 rounded-xl text-sm">
@@ -150,7 +146,7 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
             <button
               type="button"
               onClick={() => setShowNewBoardForm(true)}
-              className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl border-2 border-dashed border-gray-300 text-gray-600 font-medium hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50/50 transition-colors"
+              className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl border-2 border-dashed border-gray-300 text-gray-600 font-medium hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50/50 transition-colors focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus:outline-none"
             >
               + New Board
             </button>
@@ -165,7 +161,7 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
                     ? 'Someone is currently viewing this board'
                     : undefined
               }
-              className="px-6 py-3 rounded-xl border border-gray-200 bg-white text-gray-700 font-medium hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-6 py-3 rounded-xl border border-gray-200 bg-white text-gray-700 font-medium hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus:outline-none disabled:focus-visible:ring-0"
             >
               Delete board
             </button>
@@ -180,7 +176,7 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
                     ? 'Someone is currently viewing this board'
                     : undefined
               }
-              className="px-6 py-3 rounded-xl border border-gray-200 bg-white text-gray-700 font-medium hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-6 py-3 rounded-xl border border-gray-200 bg-white text-gray-700 font-medium hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus:outline-none disabled:focus-visible:ring-0"
             >
               Rename board
             </button>
@@ -196,8 +192,9 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
                 type="text"
                 value={newBoardName}
                 onChange={(e) => setNewBoardName(e.target.value)}
-                placeholder="Enter board name"
-                className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder="Enter board name…"
+                autoComplete="off"
+                className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:border-transparent"
                 autoFocus
                 disabled={creating}
               />
@@ -225,29 +222,28 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
             {boards.map((board) => (
               <li key={board.id}>
                 <div
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => setSelectedBoardId(board.id)}
-                  onKeyDown={(e) => e.key === 'Enter' && setSelectedBoardId(board.id)}
-                  className={`w-full text-left px-5 py-4 rounded-xl border shadow-sm transition-all cursor-pointer ${
+                  className={`w-full flex flex-col gap-2 px-5 py-4 rounded-xl border shadow-sm transition-colors ${
                     selectedBoardId === board.id
                       ? 'bg-blue-50 border-blue-300 ring-2 ring-blue-200'
                       : 'bg-white border-gray-200 hover:border-blue-200 hover:shadow'
                   }`}
                 >
-                  <span className="font-medium text-gray-800">{board.name}</span>
-                  <span className="block text-xs text-gray-500 mt-1">
-                    Created {new Date(board.created_at).toLocaleDateString()}
-                  </span>
-                  <div className="mt-3 flex gap-2">
-                    <button
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); handleOpenBoard(board.id); }}
-                      className="px-3 py-1.5 text-sm font-medium text-blue-600 hover:bg-blue-100 rounded-lg"
-                    >
-                      Open
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedBoardId(board.id)}
+                    className="w-full text-left focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus:outline-none rounded-lg -m-1 p-1"
+                  >
+                    <span className="font-medium text-gray-800 block">{board.name}</span>
+                    <span className="block text-xs text-gray-500 mt-1">
+                      Created {new Date(board.created_at).toLocaleDateString()}
+                    </span>
+                  </button>
+                  <Link
+                    to={`/board/${board.id}`}
+                    className="self-start px-3 py-1.5 text-sm font-medium text-blue-600 hover:bg-blue-100 rounded-lg focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus:outline-none"
+                  >
+                    Open
+                  </Link>
                 </div>
               </li>
             ))}
@@ -256,7 +252,7 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
 
         {showDeleteConfirm && selectedBoard && (
           <div
-            className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40"
+            className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 overscroll-contain"
             role="dialog"
             aria-modal="true"
             aria-labelledby="delete-board-title"
@@ -273,7 +269,7 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
                   type="button"
                   onClick={() => setShowDeleteConfirm(false)}
                   disabled={deleting}
-                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-xl hover:bg-gray-200 disabled:opacity-50"
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-xl hover:bg-gray-200 disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus:outline-none"
                 >
                   Cancel
                 </button>
@@ -281,7 +277,7 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
                   type="button"
                   onClick={handleDeleteBoard}
                   disabled={deleting}
-                  className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-xl hover:bg-red-700 disabled:opacity-50"
+                  className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-xl hover:bg-red-700 disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 focus:outline-none"
                 >
                   {deleting ? 'Deleting…' : 'Delete'}
                 </button>
@@ -292,7 +288,7 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
 
         {showRenameModal && selectedBoard && canModifyBoard && (
           <div
-            className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40"
+            className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 overscroll-contain"
             role="dialog"
             aria-modal="true"
             aria-labelledby="rename-board-title"
@@ -302,12 +298,17 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
                 Rename board
               </h2>
               <form onSubmit={handleRenameBoard} className="space-y-4">
+                <label htmlFor="rename-board-input" className="sr-only">
+                  Board name
+                </label>
                 <input
+                  id="rename-board-input"
                   type="text"
                   value={renameValue}
                   onChange={(e) => setRenameValue(e.target.value)}
-                  placeholder="Board name"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="Board name…"
+                  autoComplete="off"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:border-transparent"
                   autoFocus
                   disabled={renaming}
                 />
@@ -316,14 +317,14 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
                     type="button"
                     onClick={() => { setShowRenameModal(false); setRenameValue(''); }}
                     disabled={renaming}
-                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-xl hover:bg-gray-200 disabled:opacity-50"
+                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-xl hover:bg-gray-200 disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus:outline-none"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
                     disabled={renaming || !renameValue.trim()}
-                    className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-xl hover:bg-blue-700 disabled:opacity-50"
+                    className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-xl hover:bg-blue-700 disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus:outline-none"
                   >
                     {renaming ? 'Saving…' : 'Save'}
                   </button>

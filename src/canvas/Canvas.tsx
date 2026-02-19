@@ -8,9 +8,15 @@ import {
   STICKY_HEIGHT,
   DEFAULT_STICKY_COLOR,
   DEFAULT_SHAPE_COLOR,
+  DEFAULT_FRAME_COLOR,
+  DEFAULT_TEXT_COLOR,
   CIRCLE_DIAMETER,
   LINE_DEFAULT_WIDTH,
   LINE_DEFAULT_HEIGHT,
+  FRAME_DEFAULT_WIDTH,
+  FRAME_DEFAULT_HEIGHT,
+  TEXT_DEFAULT_FONT_SIZE,
+  HEARTBEAT_MS,
 } from '../constants'
 import {
   setMyCursor,
@@ -30,8 +36,8 @@ type CanvasProps = {
   activeTool: Tool
   onPresenceChange?: (names: string[]) => void
   objects: BoardObject[]
-  selectedId: string | null
-  onSelect: (id: string | null) => void
+  selectedIds: string[]
+  onSelect: (ids: string[]) => void
   onStartEditText?: (id: string, text: string) => void
   editingObject?: BoardObject | null
   editingText?: string
@@ -41,10 +47,13 @@ type CanvasProps = {
   onOptimisticAdd?: (obj: BoardObject) => void
   onAddFailed?: (id: string, err: unknown) => void
   onObjectMoved?: (id: string, x: number, y: number) => void
-  onObjectResized?: (id: string, payload: { x: number; y: number; width: number; height: number }) => void
+  onObjectResized?: (id: string, payload: { x: number; y: number; width: number; height: number; rotation?: number }) => void
   onDragStart?: (id: string) => void
   onDragEnd?: () => void
   onAfterCreateObject?: () => void
+  onBroadcastDragMove?: (id: string, x: number, y: number) => void
+  onMultiDragMove?: (movedId: string, deltaX: number, deltaY: number) => void
+  onConnectorCreated?: (fromId: string, toId: string) => void
 }
 
 export default function Canvas({
@@ -53,7 +62,7 @@ export default function Canvas({
   activeTool,
   onPresenceChange,
   objects,
-  selectedId,
+  selectedIds,
   onSelect,
   onStartEditText,
   editingObject,
@@ -68,10 +77,12 @@ export default function Canvas({
   onDragStart,
   onDragEnd,
   onAfterCreateObject,
+  onBroadcastDragMove,
+  onMultiDragMove,
+  onConnectorCreated,
 }: CanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const stageRef = useRef<Konva.Stage>(null)
-  const selectedNodeRef = useRef<Konva.Group | null>(null)
   const transformerRef = useRef<Konva.Transformer>(null)
   const lastCursorRef = useRef<number>(0)
   const [size, setSize] = useState({ width: 800, height: 600 })
@@ -79,11 +90,24 @@ export default function Canvas({
   const [stageScale, setStageScale] = useState(1)
   const posRef = useRef(stagePos)
   const scaleRef = useRef(stageScale)
-  const [otherCursors, setOtherCursors] = useState<Record<string, { uid: string; x: number; y: number; displayName: string | null; color: string }>>({})
+  const [otherCursors, setOtherCursors] = useState<
+    Record<string, { uid: string; x: number; y: number; displayName: string | null; color: string }>
+  >({})
 
   posRef.current = stagePos
   scaleRef.current = stageScale
 
+  // Drag-to-select state
+  const [selectionRect, setSelectionRect] = useState<{
+    x: number; y: number; width: number; height: number
+  } | null>(null)
+  const selectionStartRef = useRef<{ x: number; y: number } | null>(null)
+  const isSelectingRef = useRef(false)
+
+  // Connector tool: pending first object click
+  const [pendingConnectorFrom, setPendingConnectorFrom] = useState<string | null>(null)
+
+  const lastCursorPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 })
   const cursorThrottleRef = useRef(0)
   const hasReceivedFirstCursorsRef = useRef(false)
   useEffect(() => {
@@ -122,9 +146,25 @@ export default function Canvas({
     }
   }, [boardId, user?.uid])
 
+  useEffect(() => {
+    if (!user) return
+    const id = setInterval(() => {
+      setMyCursor(boardId, user.uid, {
+        x: lastCursorPosRef.current.x,
+        y: lastCursorPosRef.current.y,
+        displayName: user.displayName ?? null,
+        color: cursorColorFromUid(user.uid),
+      })
+    }, HEARTBEAT_MS)
+    return () => clearInterval(id)
+  }, [boardId, user?.uid, user?.displayName])
+
   const [spacePressed, setSpacePressed] = useState(false)
   const [isPanning, setIsPanning] = useState(false)
-  const panStartRef = useRef<{ pointer: { x: number; y: number }; stagePos: { x: number; y: number } } | null>(null)
+  const panStartRef = useRef<{
+    pointer: { x: number; y: number }
+    stagePos: { x: number; y: number }
+  } | null>(null)
 
   useEffect(() => {
     const el = containerRef.current
@@ -137,48 +177,53 @@ export default function Canvas({
     return () => ro.disconnect()
   }, [])
 
+  // Update transformer nodes whenever selectedIds changes
   useEffect(() => {
-    if (!selectedId) {
-      transformerRef.current?.nodes([])
-      selectedNodeRef.current = null
+    const tr = transformerRef.current
+    const stage = stageRef.current
+    if (!tr || !stage) return
+    if (selectedIds.length === 0) {
+      tr.nodes([])
       return
     }
     const raf = requestAnimationFrame(() => {
-      const node = selectedNodeRef.current
-      const tr = transformerRef.current
-      if (node && tr) {
-        tr.nodes([node])
-        tr.getLayer()?.batchDraw()
-      } else {
-        tr?.nodes([])
-      }
+      const nodes = selectedIds
+        .map((id) => stage.findOne(`#${id}`))
+        .filter((n): n is Konva.Node => n != null)
+      tr.nodes(nodes)
+      tr.getLayer()?.batchDraw()
     })
     return () => cancelAnimationFrame(raf)
-  }, [selectedId, objects])
+  }, [selectedIds, objects])
 
   const handleTransformEnd = useCallback(() => {
-    const node = selectedNodeRef.current
-    if (!node || !selectedId || !onObjectResized) return
-    const obj = objects.find((o) => o.id === selectedId)
-    if (!obj) return
-    const scaleX = node.scaleX()
-    const scaleY = node.scaleY()
-    const x = node.x()
-    const y = node.y()
-    let w: number
-    let h: number
-    if (obj.type === 'circle') {
-      const uniform = (scaleX + scaleY) / 2
-      w = obj.width * uniform
-      h = w
-    } else {
-      w = obj.width * scaleX
-      h = obj.height * scaleY
+    const tr = transformerRef.current
+    if (!tr || !onObjectResized) return
+    const nodes = tr.nodes() as Konva.Group[]
+    for (const node of nodes) {
+      const id = node.id()
+      const obj = objects.find((o) => o.id === id)
+      if (!obj) continue
+      const scaleX = node.scaleX()
+      const scaleY = node.scaleY()
+      const rotation = node.rotation()
+      const x = node.x()
+      const y = node.y()
+      let w: number
+      let h: number
+      if (obj.type === 'circle') {
+        const uniform = (scaleX + scaleY) / 2
+        w = obj.width * uniform
+        h = w
+      } else {
+        w = obj.width * scaleX
+        h = obj.height * scaleY
+      }
+      node.scaleX(1)
+      node.scaleY(1)
+      onObjectResized(id, { x, y, width: w, height: h, rotation })
     }
-    node.scaleX(1)
-    node.scaleY(1)
-    onObjectResized(selectedId, { x, y, width: w, height: h })
-  }, [selectedId, objects, onObjectResized])
+  }, [objects, onObjectResized])
 
   useEffect(() => {
     const isTyping = () => {
@@ -222,6 +267,7 @@ export default function Canvas({
       const now = Date.now()
       if (now - lastCursorRef.current < 50) return
       lastCursorRef.current = now
+      lastCursorPosRef.current = { x: worldX, y: worldY }
       setMyCursor(boardId, user.uid, {
         x: worldX,
         y: worldY,
@@ -232,14 +278,31 @@ export default function Canvas({
     [boardId, user]
   )
 
+  const getWorldPos = (stage: Konva.Stage) => {
+    const pointer = stage.getPointerPosition()
+    if (!pointer) return null
+    return {
+      x: (pointer.x - posRef.current.x) / scaleRef.current,
+      y: (pointer.y - posRef.current.y) / scaleRef.current,
+    }
+  }
+
   const handleMouseMove = (e: Konva.KonvaEventObject<MouseEvent>) => {
     const stage = e.target.getStage()
     if (!stage || !user) return
-    const pointer = stage.getPointerPosition()
-    if (!pointer) return
-    const worldX = (pointer.x - stagePos.x) / stageScale
-    const worldY = (pointer.y - stagePos.y) / stageScale
-    sendCursor(worldX, worldY)
+    const world = getWorldPos(stage)
+    if (!world) return
+    sendCursor(world.x, world.y)
+
+    if (isSelectingRef.current && selectionStartRef.current) {
+      const start = selectionStartRef.current
+      setSelectionRect({
+        x: Math.min(start.x, world.x),
+        y: Math.min(start.y, world.y),
+        width: Math.abs(world.x - start.x),
+        height: Math.abs(world.y - start.y),
+      })
+    }
   }
 
   const handleWheel = (e: Konva.KonvaEventObject<WheelEvent>) => {
@@ -274,14 +337,122 @@ export default function Canvas({
 
   const isPanMode = spacePressed || activeTool === 'pan'
 
+  const isCreateTool =
+    activeTool === 'sticky' ||
+    activeTool === 'rect' ||
+    activeTool === 'circle' ||
+    activeTool === 'line' ||
+    activeTool === 'frame' ||
+    activeTool === 'text'
+
+  const createObjectAtPointer = (stage: Konva.Stage) => {
+    if (!isCreateTool) return
+    const world = getWorldPos(stage)
+    if (!world) return
+    const id = crypto.randomUUID()
+    let newObj: BoardObject
+
+    if (activeTool === 'sticky') {
+      newObj = {
+        id, type: 'sticky',
+        x: world.x, y: world.y,
+        width: STICKY_WIDTH, height: STICKY_HEIGHT,
+        text: 'New note', color: DEFAULT_STICKY_COLOR,
+      }
+    } else if (activeTool === 'rect') {
+      newObj = {
+        id, type: 'rect',
+        x: world.x, y: world.y,
+        width: STICKY_WIDTH, height: STICKY_HEIGHT,
+        color: DEFAULT_SHAPE_COLOR,
+      }
+    } else if (activeTool === 'circle') {
+      newObj = {
+        id, type: 'circle',
+        x: world.x, y: world.y,
+        width: CIRCLE_DIAMETER, height: CIRCLE_DIAMETER,
+        color: DEFAULT_SHAPE_COLOR,
+      }
+    } else if (activeTool === 'line') {
+      newObj = {
+        id, type: 'line',
+        x: world.x, y: world.y,
+        width: LINE_DEFAULT_WIDTH, height: LINE_DEFAULT_HEIGHT,
+        color: DEFAULT_SHAPE_COLOR,
+      }
+    } else if (activeTool === 'frame') {
+      newObj = {
+        id, type: 'frame',
+        x: world.x, y: world.y,
+        width: FRAME_DEFAULT_WIDTH, height: FRAME_DEFAULT_HEIGHT,
+        text: 'Frame', color: DEFAULT_FRAME_COLOR,
+      }
+    } else {
+      // text
+      newObj = {
+        id, type: 'text',
+        x: world.x, y: world.y,
+        width: 200, height: 80,
+        text: 'Text', font_size: TEXT_DEFAULT_FONT_SIZE,
+        font_color: DEFAULT_TEXT_COLOR,
+      }
+    }
+
+    onOptimisticAdd?.(newObj)
+    onSelect([])
+    onAfterCreateObject?.()
+    addObject(boardId, newObj).catch((err) => {
+      console.error('Failed to create object', err)
+      onAddFailed?.(newObj.id, err)
+    })
+  }
+
+  const handleObjectClick = useCallback(
+    (id: string, shiftKey: boolean) => {
+      if (activeTool === 'connector') {
+        if (!pendingConnectorFrom) {
+          setPendingConnectorFrom(id)
+        } else if (pendingConnectorFrom !== id) {
+          onConnectorCreated?.(pendingConnectorFrom, id)
+          setPendingConnectorFrom(null)
+          onAfterCreateObject?.()
+        }
+        return
+      }
+      if (shiftKey) {
+        if (selectedIds.includes(id)) {
+          onSelect(selectedIds.filter((sid) => sid !== id))
+        } else {
+          onSelect([...selectedIds, id])
+        }
+      } else {
+        onSelect(selectedIds.length === 1 && selectedIds[0] === id ? [] : [id])
+      }
+    },
+    [activeTool, pendingConnectorFrom, selectedIds, onSelect, onConnectorCreated, onAfterCreateObject]
+  )
+
   const handleStageMouseDown = (e: Konva.KonvaEventObject<MouseEvent>) => {
-    if (!isPanMode || !isBackgroundTarget(e.target)) return
     const stage = e.target.getStage()
     if (!stage) return
-    const pointer = stage.getPointerPosition()
-    if (!pointer) return
-    setIsPanning(true)
-    panStartRef.current = { pointer: { ...pointer }, stagePos: { ...stagePos } }
+
+    if (isPanMode && isBackgroundTarget(e.target)) {
+      const pointer = stage.getPointerPosition()
+      if (!pointer) return
+      setIsPanning(true)
+      panStartRef.current = { pointer: { ...pointer }, stagePos: { ...stagePos } }
+      return
+    }
+
+    // Drag-to-select: only when not in create/pan/connector mode
+    if (!isCreateTool && !isPanMode && activeTool !== 'connector' && isBackgroundTarget(e.target)) {
+      const world = getWorldPos(stage)
+      if (world) {
+        selectionStartRef.current = world
+        isSelectingRef.current = true
+        setSelectionRect({ x: world.x, y: world.y, width: 0, height: 0 })
+      }
+    }
   }
 
   const handleStageMouseMove = (e: Konva.KonvaEventObject<MouseEvent>) => {
@@ -298,70 +469,32 @@ export default function Canvas({
     setStagePos(p)
   }
 
-  const handleStageMouseUp = () => {
+  const handleStageMouseUp = (e: Konva.KonvaEventObject<MouseEvent>) => {
     setIsPanning(false)
     panStartRef.current = null
-  }
 
-  const createObjectAtPointer = (stage: Konva.Stage) => {
-    const isCreateTool =
-      activeTool === 'sticky' || activeTool === 'rect' || activeTool === 'circle' || activeTool === 'line'
-    if (!isCreateTool) return
-    const pointer = stage.getPointerPosition()
-    if (!pointer) return
-    const worldX = (pointer.x - stagePos.x) / stageScale
-    const worldY = (pointer.y - stagePos.y) / stageScale
-    const id = crypto.randomUUID()
-    let newObj: BoardObject
-    if (activeTool === 'sticky') {
-      newObj = {
-        id,
-        type: 'sticky',
-        x: worldX,
-        y: worldY,
-        width: STICKY_WIDTH,
-        height: STICKY_HEIGHT,
-        text: 'New note',
-        color: DEFAULT_STICKY_COLOR,
+    // Finish drag-to-select
+    if (isSelectingRef.current && selectionRect) {
+      const stage = e.target.getStage()
+      if (stage) {
+        const rect = selectionRect
+        const selected = objects
+          .filter((obj) => obj.type !== 'connector')
+          .filter((obj) => {
+            const objRight = obj.x + obj.width
+            const objBottom = obj.y + obj.height
+            const rectRight = rect.x + rect.width
+            const rectBottom = rect.y + rect.height
+            return obj.x < rectRight && objRight > rect.x && obj.y < rectBottom && objBottom > rect.y
+          })
+        if (selected.length > 0) {
+          onSelect(selected.map((o) => o.id))
+        }
       }
-    } else if (activeTool === 'rect') {
-      newObj = {
-        id,
-        type: 'rect',
-        x: worldX,
-        y: worldY,
-        width: STICKY_WIDTH,
-        height: STICKY_HEIGHT,
-        color: DEFAULT_SHAPE_COLOR,
-      }
-    } else if (activeTool === 'circle') {
-      newObj = {
-        id,
-        type: 'circle',
-        x: worldX,
-        y: worldY,
-        width: CIRCLE_DIAMETER,
-        height: CIRCLE_DIAMETER,
-        color: DEFAULT_SHAPE_COLOR,
-      }
-    } else {
-      newObj = {
-        id,
-        type: 'line',
-        x: worldX,
-        y: worldY,
-        width: LINE_DEFAULT_WIDTH,
-        height: LINE_DEFAULT_HEIGHT,
-        color: DEFAULT_SHAPE_COLOR,
-      }
+      setSelectionRect(null)
+      isSelectingRef.current = false
+      selectionStartRef.current = null
     }
-    onOptimisticAdd?.(newObj)
-    onSelect(null)
-    onAfterCreateObject?.()
-    addObject(boardId, newObj).catch((err) => {
-      console.error('Failed to create object', err)
-      onAddFailed?.(newObj.id, err)
-    })
   }
 
   const handleStageClick = (e: Konva.KonvaEventObject<MouseEvent>) => {
@@ -372,33 +505,40 @@ export default function Canvas({
       target === stage ||
       target.getClassName() === 'Layer' ||
       (target.name && target.name() === 'canvas-background')
-    if (isBackground) {
-      const isCreateTool =
-        activeTool === 'sticky' || activeTool === 'rect' || activeTool === 'circle' || activeTool === 'line'
-      if (isCreateTool) {
-        createObjectAtPointer(stage)
-      } else {
-        onSelect(null)
-      }
-      return
-    }
-  }
+    if (!isBackground) return
 
-  const handleStageDoubleClick = () => {
-    // Creation is single-click only; double-click does nothing for creation
+    if (isCreateTool) {
+      createObjectAtPointer(stage)
+    } else if (activeTool === 'connector') {
+      // Clicking background cancels pending connector
+      setPendingConnectorFrom(null)
+    } else {
+      onSelect([])
+    }
   }
 
   const cursorList = Object.values(otherCursors)
 
   const showInlineEdit = editingObject && onEditingTextChange && onSaveEdit
-  const editBounds = showInlineEdit && editingObject
-    ? {
-        left: stagePos.x + editingObject.x * stageScale,
-        top: stagePos.y + editingObject.y * stageScale,
-        width: editingObject.width * stageScale,
-        height: editingObject.height * stageScale,
-      }
-    : null
+  const editBounds =
+    showInlineEdit && editingObject
+      ? {
+          left: stagePos.x + editingObject.x * stageScale,
+          top: stagePos.y + editingObject.y * stageScale,
+          width: editingObject.width * stageScale,
+          height: editingObject.height * stageScale,
+        }
+      : null
+
+  const cursorStyle = isPanMode
+    ? isPanning
+      ? 'grabbing'
+      : 'grab'
+    : activeTool === 'connector'
+    ? pendingConnectorFrom
+      ? 'crosshair'
+      : 'cell'
+    : 'default'
 
   return (
     <div ref={containerRef} className="w-full h-full bg-gray-100 relative">
@@ -419,7 +559,7 @@ export default function Canvas({
         scaleX={stageScale}
         scaleY={stageScale}
         onWheel={handleWheel}
-        style={{ cursor: isPanMode ? (isPanning ? 'grabbing' : 'grab') : 'default' }}
+        style={{ cursor: cursorStyle }}
       >
         <Layer>
           <Rect
@@ -431,40 +571,66 @@ export default function Canvas({
             listening={true}
             onClick={handleStageClick}
             onTap={handleStageClick}
-            onDblClick={handleStageDoubleClick}
-            onDblTap={handleStageDoubleClick}
           />
           <BoardObjects
             boardId={boardId}
             objects={objects}
-            selectedId={selectedId}
-            selectedNodeRef={selectedNodeRef}
-            onSelect={onSelect}
+            selectedIds={selectedIds}
+            onObjectClick={handleObjectClick}
             onStartEditText={onStartEditText}
             onObjectMoved={onObjectMoved}
             onDragStart={onDragStart}
             onDragEnd={onDragEnd}
+            onBroadcastDragMove={onBroadcastDragMove}
+            onMultiDragMove={onMultiDragMove}
+            pendingConnectorFrom={pendingConnectorFrom}
           />
           <Transformer
             ref={transformerRef}
-            rotateEnabled={false}
+            rotateEnabled={true}
+            rotationSnaps={[0, 45, 90, 135, 180, 225, 270, 315]}
             onTransformEnd={handleTransformEnd}
           />
+          {/* Drag-to-select rectangle */}
+          {selectionRect && selectionRect.width > 2 && selectionRect.height > 2 && (
+            <Rect
+              x={selectionRect.x}
+              y={selectionRect.y}
+              width={selectionRect.width}
+              height={selectionRect.height}
+              fill="rgba(37, 99, 235, 0.08)"
+              stroke="#2563eb"
+              strokeWidth={1 / stageScale}
+              listening={false}
+            />
+          )}
           <OtherCursors cursors={cursorList} currentUid={user?.uid ?? null} />
         </Layer>
       </Stage>
+
+      {/* Pending connector hint */}
+      {pendingConnectorFrom && (
+        <div className="absolute left-1/2 -translate-x-1/2 bottom-4 px-4 py-2 bg-amber-500 text-white text-sm rounded-full shadow-lg pointer-events-none z-50">
+          Now click the target object to connect
+        </div>
+      )}
+
       {editBounds && (
         <>
           <div
-            role="presentation"
-            style={{
-              position: 'absolute',
-              inset: 0,
-              zIndex: 10,
-              background: 'transparent',
-            }}
+            role="button"
+            tabIndex={0}
+            aria-label="Click outside to save"
+            style={{ position: 'absolute', inset: 0, zIndex: 10, background: 'transparent' }}
             onClick={() => onSaveEdit?.()}
-            onKeyDown={(e) => e.key === 'Escape' && onCancelEdit?.()}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') onCancelEdit?.()
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                onSaveEdit?.()
+              }
+            }}
+            className="focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-inset"
           />
           <div
             style={{
@@ -476,7 +642,10 @@ export default function Canvas({
               zIndex: 11,
               padding: Math.max(4, 8 * stageScale),
               boxSizing: 'border-box',
-              background: editingObject?.color ?? 'rgba(255,255,255,0.95)',
+              background:
+                editingObject?.type === 'text'
+                  ? 'rgba(255,255,255,0.95)'
+                  : (editingObject?.color ?? 'rgba(255,255,255,0.95)'),
               border: '2px solid #2563eb',
               borderRadius: editingObject?.type === 'circle' ? '50%' : 8,
               overflow: 'hidden',
@@ -499,12 +668,14 @@ export default function Canvas({
                   onSaveEdit?.()
                 }
               }}
+              aria-label="Edit text"
+              className="focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1"
               style={{
                 width: editingObject?.type === 'circle' ? '85%' : '100%',
                 height: editingObject?.type === 'circle' ? '85%' : '100%',
                 resize: 'none',
                 border: 'none',
-                outline: 'none',
+                background: 'transparent',
                 fontSize: Math.max(12, Math.min(20, (editingObject?.width ?? 100) * stageScale * 0.12)),
                 fontFamily: 'inherit',
                 lineHeight: 1.4,
