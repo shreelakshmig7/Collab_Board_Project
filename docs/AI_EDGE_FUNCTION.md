@@ -8,6 +8,8 @@ The AI agent uses a **Supabase Edge Function** (`ai-command`) to keep your Anthr
 supabase functions deploy ai-command
 ```
 
+**Note:** `supabase/config.toml` sets `verify_jwt = false` for `ai-command` so the gateway skips its JWT check. The function still validates auth via `getUser()` and rejects invalid/expired tokens.
+
 (Requires [Supabase CLI](https://supabase.com/docs/guides/cli) and `supabase login`.)
 
 ## 2. Set the API Key (Server-Side Secret)

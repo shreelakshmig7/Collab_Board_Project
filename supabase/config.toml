@@ -1,0 +1,5 @@
+# Skip gateway JWT verification; ai-command validates via getUser() internally.
+# Fixes 401 "Provide correct authentication credentials" when Supabase gateway's
+# legacy JWT check fails (e.g. with new asymmetric JWT signing keys).
+[functions.ai-command]
+verify_jwt = false

@@ -6,6 +6,8 @@ export type BoardObject = {
   width: number
   height: number
   text?: string
+  /** Frame body text (editable separately from header) */
+  body_text?: string
   color?: string
   /** Rotation in degrees */
   rotation?: number
@@ -21,4 +23,12 @@ export type BoardObject = {
   to_id?: string
   /** Connector style: 'line' | 'arrow' */
   style?: string
+  /** Override for connector tail (when user drags endpoint). If set, used instead of computed from object edge. */
+  from_x?: number
+  /** @see from_x */
+  from_y?: number
+  /** Override for connector head (when user drags endpoint). */
+  to_x?: number
+  /** @see to_x */
+  to_y?: number
 }

@@ -131,3 +131,12 @@ ALTER TABLE board_objects ADD COLUMN IF NOT EXISTS style TEXT;
 -- Standalone text element properties
 ALTER TABLE board_objects ADD COLUMN IF NOT EXISTS font_size DOUBLE PRECISION;
 ALTER TABLE board_objects ADD COLUMN IF NOT EXISTS font_color TEXT;
+
+-- Frame body text (separate from header/title)
+ALTER TABLE board_objects ADD COLUMN IF NOT EXISTS body_text TEXT;
+
+-- Connector endpoint overrides (when user drags tail/head to resize)
+ALTER TABLE board_objects ADD COLUMN IF NOT EXISTS from_x DOUBLE PRECISION;
+ALTER TABLE board_objects ADD COLUMN IF NOT EXISTS from_y DOUBLE PRECISION;
+ALTER TABLE board_objects ADD COLUMN IF NOT EXISTS to_x DOUBLE PRECISION;
+ALTER TABLE board_objects ADD COLUMN IF NOT EXISTS to_y DOUBLE PRECISION;

@@ -24,3 +24,6 @@ export const LINE_DEFAULT_HEIGHT = 60
 export const FRAME_DEFAULT_WIDTH = 400
 export const FRAME_DEFAULT_HEIGHT = 300
 export const TEXT_DEFAULT_FONT_SIZE = 18
+
+/** Minimum width/height for resizable objects to prevent invisible/crashed renders. */
+export const MIN_OBJECT_SIZE = 8

@@ -1,16 +1,20 @@
 import { useState, useEffect } from 'react'
 import type { BoardObject } from '../types/board'
 
-export type Tool = 'sticky' | 'rect' | 'circle' | 'line' | 'frame' | 'text' | 'connector' | 'pan'
+export type Tool = 'select' | 'sticky' | 'rect' | 'circle' | 'line' | 'frame' | 'text' | 'connector'
 
 const COLORS = ['#FEF08A', '#FECACA', '#BBF7D0', '#BFDBFE', '#E9D5FF', '#FED7AA', '#ffffff', '#1e293b']
 
 const MIN_SIZE = 20
 const MAX_SIZE = 800
 
+const CREATE_TOOLS = ['sticky', 'rect', 'circle', 'line', 'frame', 'text'] as const
+type CreateTool = (typeof CREATE_TOOLS)[number]
+
 type ToolbarProps = {
-  activeTool: Tool
-  onToolChange: (tool: Tool) => void
+  activeTool: Tool | null
+  onToolChange: (tool: Tool | null) => void
+  onCreateClick?: (tool: CreateTool) => void
   selectedIds: string[]
   selectedObject: BoardObject | null
   selectedColorableId: string | null
@@ -35,6 +39,7 @@ function toolBtn(active: boolean) {
 export default function Toolbar({
   activeTool,
   onToolChange,
+  onCreateClick,
   selectedIds,
   selectedObject,
   selectedColorableId,
@@ -79,26 +84,37 @@ export default function Toolbar({
 
   const hasSelection = selectedIds.length > 0
 
+  const handleToolClick = (tool: Tool) => {
+    if (CREATE_TOOLS.includes(tool as CreateTool) && onCreateClick) {
+      onCreateClick(tool as CreateTool)
+    } else {
+      onToolChange(tool)
+    }
+  }
+
   return (
     <div className="flex flex-wrap items-center gap-2 px-4 py-2 bg-white border-b border-gray-200 min-h-[48px]">
+      <button type="button" onClick={() => onToolChange('select')} className={toolBtn(activeTool === 'select')} title="Select tool: click objects to select; Shift+click to add to selection">
+        Select
+      </button>
       {/* Creation tools */}
       <div className="flex gap-1 flex-wrap">
-        <button type="button" onClick={() => onToolChange('sticky')} className={toolBtn(activeTool === 'sticky')}>
+        <button type="button" onClick={() => handleToolClick('sticky')} className={toolBtn(activeTool === 'sticky')}>
           Sticky
         </button>
-        <button type="button" onClick={() => onToolChange('rect')} className={toolBtn(activeTool === 'rect')}>
+        <button type="button" onClick={() => handleToolClick('rect')} className={toolBtn(activeTool === 'rect')}>
           Rect
         </button>
-        <button type="button" onClick={() => onToolChange('circle')} className={toolBtn(activeTool === 'circle')}>
+        <button type="button" onClick={() => handleToolClick('circle')} className={toolBtn(activeTool === 'circle')}>
           Circle
         </button>
-        <button type="button" onClick={() => onToolChange('line')} className={toolBtn(activeTool === 'line')}>
-          Arrow
+        <button type="button" onClick={() => handleToolClick('line')} className={toolBtn(activeTool === 'line')}>
+          Line
         </button>
-        <button type="button" onClick={() => onToolChange('frame')} className={toolBtn(activeTool === 'frame')}>
+        <button type="button" onClick={() => handleToolClick('frame')} className={toolBtn(activeTool === 'frame')}>
           Frame
         </button>
-        <button type="button" onClick={() => onToolChange('text')} className={toolBtn(activeTool === 'text')}>
+        <button type="button" onClick={() => handleToolClick('text')} className={toolBtn(activeTool === 'text')}>
           Text
         </button>
         <button type="button" onClick={() => onToolChange('connector')} className={toolBtn(activeTool === 'connector')}>

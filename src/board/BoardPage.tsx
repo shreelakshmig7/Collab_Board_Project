@@ -12,7 +12,21 @@ import type { RealtimeChannel } from '@supabase/supabase-js'
 import { signOut } from '../supabase/auth'
 import type { BoardObject } from '../types/board'
 import { runAICommand } from '../ai/claudeAgent'
-import { DEFAULT_CONNECTOR_COLOR } from '../constants'
+import {
+  DEFAULT_CONNECTOR_COLOR,
+  DEFAULT_STICKY_COLOR,
+  DEFAULT_SHAPE_COLOR,
+  DEFAULT_FRAME_COLOR,
+  DEFAULT_TEXT_COLOR,
+  STICKY_WIDTH,
+  STICKY_HEIGHT,
+  CIRCLE_DIAMETER,
+  LINE_DEFAULT_WIDTH,
+  LINE_DEFAULT_HEIGHT,
+  FRAME_DEFAULT_WIDTH,
+  FRAME_DEFAULT_HEIGHT,
+  TEXT_DEFAULT_FONT_SIZE,
+} from '../constants'
 
 function GeminiIcon({ className }: { className?: string }) {
   return (
@@ -26,22 +40,27 @@ type BoardPageProps = { user: AppUser; boardId: string; boardName: string; prese
 
 export default function BoardPage({ user, boardId, boardName, presenceNames }: BoardPageProps) {
   const navigate = useNavigate()
-  const [activeTool, setActiveTool] = useState<Tool>('sticky')
+  const [activeTool, setActiveTool] = useState<Tool | null>(null)
   const [objects, setObjects] = useState<BoardObject[]>([])
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [editingPart, setEditingPart] = useState<'header' | 'body' | null>(null)
   const [editingText, setEditingText] = useState('')
   const [showAIPanel, setShowAIPanel] = useState(false)
   const [aiPrompt, setAiPrompt] = useState('')
-  const [aiResult, setAiResult] = useState<string | null>(null)
+  const [aiChatMessages, setAiChatMessages] = useState<
+    { role: 'user' | 'assistant'; content: string; isError?: boolean }[]
+  >([])
   const [aiLoading, setAiLoading] = useState(false)
-  const [aiError, setAiError] = useState<string | null>(null)
   const [createError, setCreateError] = useState<string | null>(null)
 
   // Clipboard for copy/paste
   const clipboardRef = useRef<BoardObject[]>([])
   // Drag start positions for multi-drag
   const dragStartPositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map())
+  // Viewport center (from Canvas) for creating objects when toolbar button is clicked
+  const viewportCenterRef = useRef({ x: 250, y: 200 })
+  const aiChatScrollRef = useRef<HTMLDivElement>(null)
 
   const handleOptimisticAdd = useCallback((obj: BoardObject) => {
     setObjects((prev) => [...prev, obj])
@@ -53,8 +72,19 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
     setCreateError(addErr instanceof Error ? addErr.message : String(addErr))
   }, [])
 
+  const lastMovedIdsRef = useRef<{ ids: Set<string>; t: number }>({ ids: new Set(), t: 0 })
+  const DRAG_GUARD_MS = 600
+
   const handleObjectMoved = useCallback((id: string, x: number, y: number) => {
+    lastMovedIdsRef.current.ids.add(id)
+    lastMovedIdsRef.current.t = Date.now()
     setObjects((prev) => prev.map((o) => (o.id === id ? { ...o, x, y } : o)))
+  }, [])
+
+  const handleObjectParentChange = useCallback((id: string, parentId: string | null) => {
+    setObjects((prev) =>
+      prev.map((o) => (o.id === id ? { ...o, parent_id: parentId ?? undefined } : o))
+    )
   }, [])
 
   const handleDragStart = useCallback(
@@ -78,6 +108,11 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
   )
 
   const handleDragEnd = useCallback(() => {
+    const id = draggingIdRef.current
+    if (id) {
+      lastMovedIdsRef.current.ids.add(id)
+      lastMovedIdsRef.current.t = Date.now()
+    }
     draggingIdRef.current = null
     dragStartPositionsRef.current = new Map()
   }, [])
@@ -120,7 +155,23 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
   const setObjectsFromSubscription = useCallback((data: BoardObject[]) => {
     setObjects((prev) => {
       if (data.length === 0 && prev.length > 0) return prev
-      return data
+      const { ids: movedIds, t: movedT } = lastMovedIdsRef.current
+      const inGuard = movedIds.size > 0 && Date.now() - movedT < DRAG_GUARD_MS
+      if (!inGuard) {
+        lastMovedIdsRef.current.ids.clear()
+        return data
+      }
+      const prevById = new Map(prev.map((o) => [o.id, o]))
+      const dataIds = new Set(data.map((o) => o.id))
+      const merged = data.map((fetched) => {
+        const existing = prevById.get(fetched.id)
+        if (existing && movedIds.has(fetched.id)) {
+          return { ...fetched, x: existing.x, y: existing.y, parent_id: existing.parent_id ?? fetched.parent_id }
+        }
+        return fetched
+      })
+      const missingFromFetch = prev.filter((o) => movedIds.has(o.id) && !dataIds.has(o.id))
+      return [...merged, ...missingFromFetch]
     })
   }, [])
 
@@ -138,6 +189,11 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
         const existing = prev[idx]
         const { id: lastId, t } = lastLocalResizeRef.current
         const justResized = obj.id === lastId && Date.now() - t < 1500
+        const { ids: movedIds, t: movedT } = lastMovedIdsRef.current
+        const justDragged =
+          change.event === 'UPDATE' &&
+          movedIds.has(obj.id) &&
+          Date.now() - movedT < DRAG_GUARD_MS
         const next = [...prev]
         if (change.event === 'UPDATE' && justResized) {
           next[idx] = {
@@ -146,6 +202,14 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
             y: existing.y,
             width: existing.width,
             height: existing.height,
+            rotation: existing.rotation ?? obj.rotation,
+          }
+        } else if (justDragged) {
+          next[idx] = {
+            ...obj,
+            x: existing.x,
+            y: existing.y,
+            parent_id: existing.parent_id ?? obj.parent_id,
           }
         } else {
           next[idx] = obj
@@ -160,10 +224,22 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
     setSelectedIds([])
   }, [boardId])
 
+  const shouldScheduleRefetch = useCallback((change: import('../supabase/objects').RealtimeObjectChange) => {
+    if (change.event !== 'UPDATE') return true
+    const { ids, t } = lastMovedIdsRef.current
+    if (ids.has(change.new.id) && Date.now() - t < DRAG_GUARD_MS) return false
+    return true
+  }, [])
+
   useEffect(() => {
-    const unsub = subscribeObjects(boardId, setObjectsFromSubscription, handleRealtimeObjectChange)
+    const unsub = subscribeObjects(
+      boardId,
+      setObjectsFromSubscription,
+      handleRealtimeObjectChange,
+      shouldScheduleRefetch
+    )
     return unsub
-  }, [boardId, setObjectsFromSubscription, handleRealtimeObjectChange])
+  }, [boardId, setObjectsFromSubscription, handleRealtimeObjectChange, shouldScheduleRefetch])
 
   useEffect(() => {
     const result = subscribeDragMoves(boardId, ({ userId, objectId, x, y }) => {
@@ -205,15 +281,66 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
     setSelectedIds(newIds)
   }, [boardId, objects, selectedIds])
 
+  const getFrameDescendantIds = useCallback((frameId: string): Set<string> => {
+    const result = new Set<string>()
+    const collect = (id: string) => {
+      objects.filter((o) => o.parent_id === id).forEach((c) => {
+        result.add(c.id)
+        if (c.type === 'frame') collect(c.id)
+      })
+    }
+    collect(frameId)
+    return result
+  }, [objects])
+
   const handleDeleteSelected = useCallback(() => {
     if (selectedIds.length === 0) return
-    const idsToDelete = [...selectedIds]
+    const idsToDelete = new Set(selectedIds)
+    for (const id of selectedIds) {
+      const obj = objects.find((o) => o.id === id)
+      if (obj?.type === 'frame') {
+        getFrameDescendantIds(id).forEach((descId) => idsToDelete.add(descId))
+      }
+    }
+    const arr = Array.from(idsToDelete)
     setSelectedIds([])
-    setObjects((prev) => prev.filter((o) => !idsToDelete.includes(o.id)))
-    for (const id of idsToDelete) {
+    setObjects((prev) => prev.filter((o) => !idsToDelete.has(o.id)))
+    for (const id of arr) {
       deleteObject(boardId, id).catch((err: unknown) => console.error('Failed to delete object', err))
     }
-  }, [boardId, selectedIds])
+  }, [boardId, selectedIds, objects, getFrameDescendantIds])
+
+  const handleConnectorMoved = useCallback(
+    (id: string, fromX: number, fromY: number, toX: number, toY: number) => {
+      setObjects((prev) =>
+        prev.map((o) =>
+          o.id === id && o.type === 'connector'
+            ? { ...o, from_x: fromX, from_y: fromY, to_x: toX, to_y: toY }
+            : o
+        )
+      )
+      updateObject(boardId, id, { from_x: fromX, from_y: fromY, to_x: toX, to_y: toY }).catch(
+        (err: unknown) => console.error('Failed to update connector position', err)
+      )
+    },
+    [boardId]
+  )
+
+  const handleConnectorResized = useCallback(
+    (id: string, fromX: number, fromY: number, toX: number, toY: number) => {
+      setObjects((prev) =>
+        prev.map((o) =>
+          o.id === id && o.type === 'connector'
+            ? { ...o, from_x: fromX, from_y: fromY, to_x: toX, to_y: toY }
+            : o
+        )
+      )
+      updateObject(boardId, id, { from_x: fromX, from_y: fromY, to_x: toX, to_y: toY }).catch(
+        (err: unknown) => console.error('Failed to update connector resize', err)
+      )
+    },
+    [boardId]
+  )
 
   /** Handle connector creation between two objects */
   const handleConnectorCreated = useCallback(
@@ -287,31 +414,42 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [boardId, selectedIds, editingId, objects, handleDeleteSelected, handleDuplicate])
 
-  const handleStartEditText = useCallback((id: string, text: string) => {
+  const handleStartEditText = useCallback((id: string, text: string, part?: 'header' | 'body') => {
     setEditingId(id)
+    setEditingPart(part ?? null)
     setEditingText(text)
   }, [])
 
   const handleSaveEditText = useCallback(() => {
     if (!editingId) {
       setEditingId(null)
+      setEditingPart(null)
       setEditingText('')
       return
     }
     const id = editingId
+    const part = editingPart
     const newText = editingText
-    const previousText = objects.find((o) => o.id === id)?.text ?? ''
+    const obj = objects.find((o) => o.id === id)
+    const prevText = part === 'body' ? (obj?.body_text ?? '') : (obj?.text ?? '')
     setEditingId(null)
+    setEditingPart(null)
     setEditingText('')
-    setObjects((prev) => prev.map((o) => (o.id === id ? { ...o, text: newText } : o)))
-    updateObject(boardId, id, { text: newText }).catch((err: unknown) => {
+    const update = part === 'body' ? { body_text: newText } : { text: newText }
+    setObjects((prev) =>
+      prev.map((o) => (o.id === id ? { ...o, ...update } : o))
+    )
+    updateObject(boardId, id, update).catch((err: unknown) => {
       console.error('Failed to save text', err)
-      setObjects((prev) => prev.map((o) => (o.id === id ? { ...o, text: previousText } : o)))
+      setObjects((prev) =>
+        prev.map((o) => (o.id === id ? { ...o, ...(part === 'body' ? { body_text: prevText } : { text: prevText }) } : o))
+      )
     })
-  }, [boardId, editingId, editingText, objects])
+  }, [boardId, editingId, editingPart, editingText, objects])
 
   const handleCancelEdit = useCallback(() => {
     setEditingId(null)
+    setEditingPart(null)
     setEditingText('')
   }, [])
 
@@ -354,6 +492,50 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
     signOut()
   }, [user.uid])
 
+  /** Create object at viewport center when user clicks a create tool button */
+  const handleCreateFromToolbar = useCallback(
+    (tool: 'sticky' | 'rect' | 'circle' | 'line' | 'frame' | 'text') => {
+      const { x, y } = viewportCenterRef.current
+      const id = crypto.randomUUID()
+      let newObj: BoardObject
+      if (tool === 'sticky') {
+        newObj = { id, type: 'sticky', x, y, width: STICKY_WIDTH, height: STICKY_HEIGHT, text: 'New note', color: DEFAULT_STICKY_COLOR }
+      } else if (tool === 'rect') {
+        newObj = { id, type: 'rect', x, y, width: STICKY_WIDTH, height: STICKY_HEIGHT, color: DEFAULT_SHAPE_COLOR }
+      } else if (tool === 'circle') {
+        newObj = { id, type: 'circle', x, y, width: CIRCLE_DIAMETER, height: CIRCLE_DIAMETER, color: DEFAULT_SHAPE_COLOR }
+      } else if (tool === 'line') {
+        newObj = { id, type: 'line', x, y, width: LINE_DEFAULT_WIDTH, height: LINE_DEFAULT_HEIGHT, color: DEFAULT_SHAPE_COLOR }
+      } else if (tool === 'frame') {
+        newObj = { id, type: 'frame', x, y, width: FRAME_DEFAULT_WIDTH, height: FRAME_DEFAULT_HEIGHT, text: 'Frame', color: DEFAULT_FRAME_COLOR }
+      } else {
+        newObj = { id, type: 'text', x, y, width: 200, height: 80, text: 'Text', font_size: TEXT_DEFAULT_FONT_SIZE, font_color: DEFAULT_TEXT_COLOR }
+      }
+      if (newObj.type !== 'frame') {
+        const cx = newObj.x + newObj.width / 2
+        const cy = newObj.y + newObj.height / 2
+        const containingFrame = objects.find(
+          (o) =>
+            o.type === 'frame' &&
+            cx >= o.x &&
+            cx <= o.x + o.width &&
+            cy >= o.y &&
+            cy <= o.y + o.height
+        )
+        if (containingFrame) newObj.parent_id = containingFrame.id
+      }
+      setObjects((prev) => [...prev, newObj])
+      setCreateError(null)
+      setSelectedIds([id])
+      setActiveTool(null)
+      addObject(boardId, newObj).catch((err: unknown) => {
+        console.error('Failed to create object', err)
+        setObjects((prev) => prev.filter((o) => o.id !== id))
+      })
+    },
+    [boardId, objects]
+  )
+
   const handleClearBoard = useCallback(() => {
     deleteAllObjects(boardId)
       .then(() => setObjects([]))
@@ -364,18 +546,26 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
     navigate('/')
   }, [navigate])
 
+  useEffect(() => {
+    aiChatScrollRef.current?.scrollTo({ top: aiChatScrollRef.current.scrollHeight, behavior: 'smooth' })
+  }, [aiChatMessages, aiLoading])
+
   const handleRunAI = useCallback(async () => {
     const prompt = aiPrompt.trim()
     if (!prompt) return
+    setAiPrompt('')
     setAiLoading(true)
-    setAiResult(null)
-    setAiError(null)
+    setAiChatMessages((prev) => [...prev, { role: 'user', content: prompt }])
     try {
       const result = await runAICommand(prompt, objects, boardId)
-      setAiResult(result.text)
-      if (result.error) setAiError(result.error)
+      if (result.error) {
+        setAiChatMessages((prev) => [...prev, { role: 'assistant', content: result.error!, isError: true }])
+      } else {
+        setAiChatMessages((prev) => [...prev, { role: 'assistant', content: result.text }])
+      }
     } catch (err: unknown) {
-      setAiError(err instanceof Error ? err.message : String(err))
+      const errMsg = err instanceof Error ? err.message : String(err)
+      setAiChatMessages((prev) => [...prev, { role: 'assistant', content: errMsg, isError: true }])
     } finally {
       setAiLoading(false)
     }
@@ -395,6 +585,7 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
       <Toolbar
         activeTool={activeTool}
         onToolChange={setActiveTool}
+        onCreateClick={handleCreateFromToolbar}
         selectedIds={selectedIds}
         selectedObject={selectedObject}
         selectedColorableId={selectedColorableId}
@@ -418,6 +609,7 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
           onSelect={setSelectedIds}
           onStartEditText={handleStartEditText}
           editingObject={editingObject}
+          editingPart={editingPart}
           editingText={editingText}
           onEditingTextChange={setEditingText}
           onSaveEdit={handleSaveEditText}
@@ -425,68 +617,147 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
           onOptimisticAdd={handleOptimisticAdd}
           onAddFailed={handleAddFailed}
           onObjectMoved={handleObjectMoved}
+          onObjectParentChange={handleObjectParentChange}
           onObjectResized={handleObjectResized}
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
-          onAfterCreateObject={() => setActiveTool('pan')}
+          onAfterCreateObject={() => setActiveTool(null)}
           onBroadcastDragMove={handleBroadcastDragMove}
           onMultiDragMove={handleMultiDragMove}
           onConnectorCreated={handleConnectorCreated}
+          onConnectorResized={handleConnectorResized}
+          onConnectorMoved={handleConnectorMoved}
+          onViewportChange={(c) => { viewportCenterRef.current = c }}
         />
       </div>
 
-      {/* AI panel */}
+      {/* AI panel — vertical sidebar */}
       {showAIPanel && (
-        <div className="px-4 py-3 bg-violet-50 border-t border-violet-200 flex flex-wrap items-center gap-3">
-          <label htmlFor="ai-prompt-input" className="sr-only">
-            AI command
-          </label>
-          <input
-            id="ai-prompt-input"
-            type="text"
-            placeholder='e.g. "Create a SWOT analysis" or "Add a yellow sticky that says Hello"'
-            autoComplete="off"
-            value={aiPrompt}
-            onChange={(e) => setAiPrompt(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleRunAI()}
-            disabled={aiLoading}
-            className="flex-1 min-w-[240px] px-3 py-2 text-sm border border-violet-300 rounded-md focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-1 focus:outline-none"
-          />
-          <button
-            type="button"
-            onClick={handleRunAI}
-            disabled={aiLoading}
-            className="px-4 py-2 text-sm cursor-pointer bg-violet-700 text-white border-0 rounded-md disabled:opacity-70 disabled:cursor-wait hover:bg-violet-800 focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 focus:outline-none"
-          >
-            {aiLoading ? 'Running…' : 'Run'}
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowAIPanel(false)}
-            className="px-3 py-2 text-sm cursor-pointer hover:bg-violet-100 rounded-md focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 focus:outline-none"
-          >
-            Close
-          </button>
-          {(aiResult != null || aiError) && (
-            <span className={`text-sm ${aiError ? 'text-red-600' : 'text-gray-500'}`}>
-              {aiError ?? aiResult}
-            </span>
-          )}
+        <div className="fixed right-0 bottom-0 w-72 h-[50vh] min-h-[280px] z-30 flex flex-col bg-white border-l border-t border-gray-200 shadow-[-4px_0_16px_rgba(0,0,0,0.08)] rounded-tl-xl">
+          {/* Header */}
+          <div className="flex items-center justify-between px-3 py-3 border-b border-gray-100">
+            <span className="text-sm font-medium text-gray-800">AI Assistant</span>
+            <button
+              type="button"
+              onClick={() => {
+                setShowAIPanel(false)
+                setAiChatMessages([])
+              }}
+              className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700 cursor-pointer focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 focus:outline-none"
+              aria-label="Close AI panel"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          {/* Chat history */}
+          <div ref={aiChatScrollRef} className="flex-1 min-h-0 overflow-y-auto px-3 py-3 flex flex-col gap-3">
+            {aiChatMessages.length === 0 && !aiLoading && (
+              <p className="text-sm text-gray-400 text-center py-6">Send a command to get started.</p>
+            )}
+            {aiChatMessages.map((msg, i) => (
+              <div
+                key={i}
+                className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+              >
+                <div
+                  className={`max-w-[90%] px-3 py-2 rounded-xl text-sm ${
+                    msg.role === 'user'
+                      ? 'bg-violet-600 text-white'
+                      : msg.isError
+                        ? 'bg-red-50 text-red-700'
+                        : 'bg-gray-100 text-gray-700'
+                  }`}
+                >
+                  {msg.content}
+                </div>
+              </div>
+            ))}
+            {aiLoading && (
+              <div className="flex justify-start">
+                <div className="px-3 py-2 rounded-xl text-sm bg-gray-100 text-gray-500">
+                  Thinking…
+                </div>
+              </div>
+            )}
+          </div>
+          {/* Vertical input area */}
+          <div className="flex flex-col gap-2 p-3 border-t border-gray-100">
+            <div className="flex items-center gap-1 text-gray-400">
+              <button
+                type="button"
+                className="p-1.5 rounded-lg hover:bg-gray-100 hover:text-gray-600 transition-colors cursor-pointer disabled:opacity-50"
+                disabled
+                aria-label="Attach file (coming soon)"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.414a2 2 0 00-2.828-2.828l-6.414 6.414a4 4 0 11-5.656-5.656l6.586-6.586" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                className="p-1.5 rounded-lg hover:bg-gray-100 hover:text-gray-600 transition-colors cursor-pointer disabled:opacity-50"
+                disabled
+                aria-label="Emoji (coming soon)"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </button>
+            </div>
+            <label htmlFor="ai-prompt-input" className="sr-only">
+              AI command
+            </label>
+            <textarea
+              id="ai-prompt-input"
+              placeholder="Write your message and press Enter"
+              autoComplete="off"
+              value={aiPrompt}
+              onChange={(e) => setAiPrompt(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleRunAI())}
+              disabled={aiLoading}
+              rows={3}
+              className="w-full resize-none px-3 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-1 focus-visible:border-transparent placeholder:text-gray-400"
+            />
+            <button
+              type="button"
+              onClick={handleRunAI}
+              disabled={aiLoading}
+              className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl bg-violet-600 text-white text-sm font-medium cursor-pointer disabled:opacity-70 disabled:cursor-wait hover:bg-violet-700 active:scale-[0.99] transition-all focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 focus:outline-none"
+              aria-label={aiLoading ? 'Running…' : 'Send'}
+            >
+              {aiLoading ? (
+                <>
+                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" aria-hidden />
+                  Running…
+                </>
+              ) : (
+                <>
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
+                  </svg>
+                  Send
+                </>
+              )}
+            </button>
+          </div>
         </div>
       )}
 
-      {/* AI button fixed bottom-right */}
-      <div className="fixed right-6 bottom-6 z-40">
-        <button
-          type="button"
-          onClick={() => setShowAIPanel((v) => !v)}
-          className="flex items-center justify-center w-12 h-12 rounded-xl bg-gradient-to-br from-violet-100 to-indigo-100 text-violet-600 hover:from-violet-200 hover:to-indigo-200 active:scale-95 transition-colors duration-200 shadow-lg border border-violet-200/60 focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2"
-          aria-label={showAIPanel ? 'Close AI panel' : 'Open AI panel'}
-          aria-expanded={showAIPanel}
-        >
-          <GeminiIcon className="w-6 h-6" />
-        </button>
-      </div>
+      {/* AI button fixed bottom-right — hidden when panel is open */}
+      {!showAIPanel && (
+        <div className="fixed right-6 bottom-6 z-40">
+          <button
+            type="button"
+            onClick={() => setShowAIPanel(true)}
+            className="flex items-center justify-center w-12 h-12 rounded-xl bg-gradient-to-br from-violet-100 to-indigo-100 text-violet-600 hover:from-violet-200 hover:to-indigo-200 active:scale-95 transition-colors duration-200 shadow-lg border border-violet-200/60 focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2"
+            aria-label="Open AI panel"
+          >
+            <GeminiIcon className="w-6 h-6" />
+          </button>
+        </div>
+      )}
     </div>
   )
 }

@@ -17,6 +17,7 @@ import {
   FRAME_DEFAULT_HEIGHT,
   TEXT_DEFAULT_FONT_SIZE,
   HEARTBEAT_MS,
+  MIN_OBJECT_SIZE,
 } from '../constants'
 import {
   setMyCursor,
@@ -33,13 +34,14 @@ import BoardObjects from './BoardObjects'
 type CanvasProps = {
   boardId: string
   user: AppUser
-  activeTool: Tool
+  activeTool: Tool | null
   onPresenceChange?: (names: string[]) => void
   objects: BoardObject[]
   selectedIds: string[]
   onSelect: (ids: string[]) => void
-  onStartEditText?: (id: string, text: string) => void
+  onStartEditText?: (id: string, text: string, part?: 'header' | 'body') => void
   editingObject?: BoardObject | null
+  editingPart?: 'header' | 'body' | null
   editingText?: string
   onEditingTextChange?: (text: string) => void
   onSaveEdit?: () => void
@@ -47,6 +49,7 @@ type CanvasProps = {
   onOptimisticAdd?: (obj: BoardObject) => void
   onAddFailed?: (id: string, err: unknown) => void
   onObjectMoved?: (id: string, x: number, y: number) => void
+  onObjectParentChange?: (id: string, parentId: string | null) => void
   onObjectResized?: (id: string, payload: { x: number; y: number; width: number; height: number; rotation?: number }) => void
   onDragStart?: (id: string) => void
   onDragEnd?: () => void
@@ -54,6 +57,9 @@ type CanvasProps = {
   onBroadcastDragMove?: (id: string, x: number, y: number) => void
   onMultiDragMove?: (movedId: string, deltaX: number, deltaY: number) => void
   onConnectorCreated?: (fromId: string, toId: string) => void
+  onConnectorResized?: (id: string, fromX: number, fromY: number, toX: number, toY: number) => void
+  onConnectorMoved?: (id: string, fromX: number, fromY: number, toX: number, toY: number) => void
+  onViewportChange?: (center: { x: number; y: number }) => void
 }
 
 export default function Canvas({
@@ -66,6 +72,7 @@ export default function Canvas({
   onSelect,
   onStartEditText,
   editingObject,
+  editingPart,
   editingText = '',
   onEditingTextChange,
   onSaveEdit,
@@ -73,6 +80,7 @@ export default function Canvas({
   onOptimisticAdd,
   onAddFailed,
   onObjectMoved,
+  onObjectParentChange,
   onObjectResized,
   onDragStart,
   onDragEnd,
@@ -80,6 +88,9 @@ export default function Canvas({
   onBroadcastDragMove,
   onMultiDragMove,
   onConnectorCreated,
+  onConnectorResized,
+  onConnectorMoved,
+  onViewportChange,
 }: CanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const stageRef = useRef<Konva.Stage>(null)
@@ -97,12 +108,6 @@ export default function Canvas({
   posRef.current = stagePos
   scaleRef.current = stageScale
 
-  // Drag-to-select state
-  const [selectionRect, setSelectionRect] = useState<{
-    x: number; y: number; width: number; height: number
-  } | null>(null)
-  const selectionStartRef = useRef<{ x: number; y: number } | null>(null)
-  const isSelectingRef = useRef(false)
 
   // Connector tool: pending first object click
   const [pendingConnectorFrom, setPendingConnectorFrom] = useState<string | null>(null)
@@ -159,7 +164,6 @@ export default function Canvas({
     return () => clearInterval(id)
   }, [boardId, user?.uid, user?.displayName])
 
-  const [spacePressed, setSpacePressed] = useState(false)
   const [isPanning, setIsPanning] = useState(false)
   const panStartRef = useRef<{
     pointer: { x: number; y: number }
@@ -177,20 +181,26 @@ export default function Canvas({
     return () => ro.disconnect()
   }, [])
 
-  // Update transformer nodes whenever selectedIds changes
+  // Notify viewport center (for creating objects at center when toolbar button is clicked)
+  useEffect(() => {
+    onViewportChange?.({
+      x: (-posRef.current.x + size.width / 2) / scaleRef.current,
+      y: (-posRef.current.y + size.height / 2) / scaleRef.current,
+    })
+  }, [size, stagePos, stageScale, onViewportChange])
+
+  // Update transformer: show resize/rotate handles for single selection (including connectors).
   useEffect(() => {
     const tr = transformerRef.current
     const stage = stageRef.current
     if (!tr || !stage) return
-    if (selectedIds.length === 0) {
+    if (selectedIds.length === 0 || selectedIds.length > 1) {
       tr.nodes([])
       return
     }
     const raf = requestAnimationFrame(() => {
-      const nodes = selectedIds
-        .map((id) => stage.findOne(`#${id}`))
-        .filter((n): n is Konva.Node => n != null)
-      tr.nodes(nodes)
+      const node = stage.findOne(`#${selectedIds[0]}`)
+      tr.nodes(node ? [node] : [])
       tr.getLayer()?.batchDraw()
     })
     return () => cancelAnimationFrame(raf)
@@ -198,17 +208,48 @@ export default function Canvas({
 
   const handleTransformEnd = useCallback(() => {
     const tr = transformerRef.current
-    if (!tr || !onObjectResized) return
-    const nodes = tr.nodes() as Konva.Group[]
+    if (!tr) return
+    const nodes = tr.nodes() as Konva.Node[]
     for (const node of nodes) {
       const id = node.id()
       const obj = objects.find((o) => o.id === id)
       if (!obj) continue
-      const scaleX = node.scaleX()
-      const scaleY = node.scaleY()
+
+      if (obj.type === 'connector') {
+        const lineNode = (node as Konva.Container).getChildren()[0] as Konva.Line | undefined
+        const points = lineNode?.points?.()
+        if (!points || points.length < 4) continue
+        const w = points[2]
+        const h = points[3]
+        const transform = node.getAbsoluteTransform()
+        const fromAbs = transform.point({ x: 0, y: 0 })
+        const toAbs = transform.point({ x: w, y: h })
+        // getAbsoluteTransform can include stage scale/pan; convert to layer (world) coords
+        const scale = scaleRef.current
+        const pos = posRef.current
+        const fromWorldX = (fromAbs.x - pos.x) / scale
+        const fromWorldY = (fromAbs.y - pos.y) / scale
+        const toWorldX = (toAbs.x - pos.x) / scale
+        const toWorldY = (toAbs.y - pos.y) / scale
+        node.scaleX(1)
+        node.scaleY(1)
+        node.rotation(0)
+        node.position({ x: 0, y: 0 })
+        onConnectorResized?.(id, fromWorldX, fromWorldY, toWorldX, toWorldY)
+        continue
+      }
+
+      if (!onObjectResized) continue
+      const scaleX = Math.abs(node.scaleX())
+      const scaleY = Math.abs(node.scaleY())
       const rotation = node.rotation()
-      const x = node.x()
-      const y = node.y()
+      // Use absolute position so nested objects (inside frames) get correct world coords
+      const absTransform = node.getAbsoluteTransform()
+      const topLeftAbs = absTransform.point({ x: 0, y: 0 })
+      const scale = scaleRef.current
+      const pos = posRef.current
+      const x = (topLeftAbs.x - pos.x) / scale
+      const y = (topLeftAbs.y - pos.y) / scale
       let w: number
       let h: number
       if (obj.type === 'circle') {
@@ -219,38 +260,13 @@ export default function Canvas({
         w = obj.width * scaleX
         h = obj.height * scaleY
       }
+      w = Math.max(MIN_OBJECT_SIZE, Number.isFinite(w) ? w : obj.width)
+      h = Math.max(MIN_OBJECT_SIZE, Number.isFinite(h) ? h : obj.height)
       node.scaleX(1)
       node.scaleY(1)
       onObjectResized(id, { x, y, width: w, height: h, rotation })
     }
-  }, [objects, onObjectResized])
-
-  useEffect(() => {
-    const isTyping = () => {
-      const el = document.activeElement
-      if (!el || !(el instanceof HTMLElement)) return false
-      const tag = el.tagName.toLowerCase()
-      return tag === 'input' || tag === 'textarea' || el.isContentEditable
-    }
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && !isTyping()) {
-        e.preventDefault()
-        setSpacePressed(true)
-      }
-    }
-    const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && !isTyping()) {
-        e.preventDefault()
-        setSpacePressed(false)
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    window.addEventListener('keyup', handleKeyUp)
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown)
-      window.removeEventListener('keyup', handleKeyUp)
-    }
-  }, [])
+  }, [objects, onObjectResized, onConnectorResized])
 
   useEffect(() => {
     const handleGlobalMouseUp = () => {
@@ -294,15 +310,6 @@ export default function Canvas({
     if (!world) return
     sendCursor(world.x, world.y)
 
-    if (isSelectingRef.current && selectionStartRef.current) {
-      const start = selectionStartRef.current
-      setSelectionRect({
-        x: Math.min(start.x, world.x),
-        y: Math.min(start.y, world.y),
-        width: Math.abs(world.x - start.x),
-        height: Math.abs(world.y - start.y),
-      })
-    }
   }
 
   const handleWheel = (e: Konva.KonvaEventObject<WheelEvent>) => {
@@ -335,8 +342,6 @@ export default function Canvas({
     target.getClassName() === 'Layer' ||
     (target.name && target.name() === 'canvas-background')
 
-  const isPanMode = spacePressed || activeTool === 'pan'
-
   const isCreateTool =
     activeTool === 'sticky' ||
     activeTool === 'rect' ||
@@ -344,7 +349,6 @@ export default function Canvas({
     activeTool === 'line' ||
     activeTool === 'frame' ||
     activeTool === 'text'
-
   const createObjectAtPointer = (stage: Konva.Stage) => {
     if (!isCreateTool) return
     const world = getWorldPos(stage)
@@ -398,6 +402,21 @@ export default function Canvas({
       }
     }
 
+    // If created inside a frame, set as child
+    if (newObj.type !== 'frame') {
+      const cx = newObj.x + newObj.width / 2
+      const cy = newObj.y + newObj.height / 2
+      const containingFrame = objects.find(
+        (o) =>
+          o.type === 'frame' &&
+          cx >= o.x &&
+          cx <= o.x + o.width &&
+          cy >= o.y &&
+          cy <= o.y + o.height
+      )
+      if (containingFrame) newObj.parent_id = containingFrame.id
+    }
+
     onOptimisticAdd?.(newObj)
     onSelect([])
     onAfterCreateObject?.()
@@ -436,22 +455,12 @@ export default function Canvas({
     const stage = e.target.getStage()
     if (!stage) return
 
-    if (isPanMode && isBackgroundTarget(e.target)) {
+    // Click+drag on empty canvas = pan
+    if (isBackgroundTarget(e.target)) {
       const pointer = stage.getPointerPosition()
       if (!pointer) return
       setIsPanning(true)
       panStartRef.current = { pointer: { ...pointer }, stagePos: { ...stagePos } }
-      return
-    }
-
-    // Drag-to-select: only when not in create/pan/connector mode
-    if (!isCreateTool && !isPanMode && activeTool !== 'connector' && isBackgroundTarget(e.target)) {
-      const world = getWorldPos(stage)
-      if (world) {
-        selectionStartRef.current = world
-        isSelectingRef.current = true
-        setSelectionRect({ x: world.x, y: world.y, width: 0, height: 0 })
-      }
     }
   }
 
@@ -469,32 +478,9 @@ export default function Canvas({
     setStagePos(p)
   }
 
-  const handleStageMouseUp = (e: Konva.KonvaEventObject<MouseEvent>) => {
+  const handleStageMouseUp = (_e: Konva.KonvaEventObject<MouseEvent>) => {
     setIsPanning(false)
     panStartRef.current = null
-
-    // Finish drag-to-select
-    if (isSelectingRef.current && selectionRect) {
-      const stage = e.target.getStage()
-      if (stage) {
-        const rect = selectionRect
-        const selected = objects
-          .filter((obj) => obj.type !== 'connector')
-          .filter((obj) => {
-            const objRight = obj.x + obj.width
-            const objBottom = obj.y + obj.height
-            const rectRight = rect.x + rect.width
-            const rectBottom = rect.y + rect.height
-            return obj.x < rectRight && objRight > rect.x && obj.y < rectBottom && objBottom > rect.y
-          })
-        if (selected.length > 0) {
-          onSelect(selected.map((o) => o.id))
-        }
-      }
-      setSelectionRect(null)
-      isSelectingRef.current = false
-      selectionStartRef.current = null
-    }
   }
 
   const handleStageClick = (e: Konva.KonvaEventObject<MouseEvent>) => {
@@ -507,10 +493,10 @@ export default function Canvas({
       (target.name && target.name() === 'canvas-background')
     if (!isBackground) return
 
+    // Click (without drag) on background: create object, clear selection, or cancel connector
     if (isCreateTool) {
       createObjectAtPointer(stage)
     } else if (activeTool === 'connector') {
-      // Clicking background cancels pending connector
       setPendingConnectorFrom(null)
     } else {
       onSelect([])
@@ -522,23 +508,41 @@ export default function Canvas({
   const showInlineEdit = editingObject && onEditingTextChange && onSaveEdit
   const editBounds =
     showInlineEdit && editingObject
-      ? {
-          left: stagePos.x + editingObject.x * stageScale,
-          top: stagePos.y + editingObject.y * stageScale,
-          width: editingObject.width * stageScale,
-          height: editingObject.height * stageScale,
-        }
+      ? (() => {
+          const isFrame = editingObject.type === 'frame'
+          const headerH = 40
+          if (isFrame && editingPart === 'header') {
+            return {
+              left: stagePos.x + editingObject.x * stageScale,
+              top: stagePos.y + editingObject.y * stageScale,
+              width: editingObject.width * stageScale,
+              height: headerH * stageScale,
+            }
+          }
+          if (isFrame && editingPart === 'body') {
+            return {
+              left: stagePos.x + editingObject.x * stageScale,
+              top: stagePos.y + (editingObject.y + headerH) * stageScale,
+              width: editingObject.width * stageScale,
+              height: (editingObject.height - headerH) * stageScale,
+            }
+          }
+          return {
+            left: stagePos.x + editingObject.x * stageScale,
+            top: stagePos.y + editingObject.y * stageScale,
+            width: editingObject.width * stageScale,
+            height: editingObject.height * stageScale,
+          }
+        })()
       : null
 
-  const cursorStyle = isPanMode
-    ? isPanning
-      ? 'grabbing'
-      : 'grab'
+  const cursorStyle = isPanning
+    ? 'grabbing'
     : activeTool === 'connector'
-    ? pendingConnectorFrom
-      ? 'crosshair'
-      : 'cell'
-    : 'default'
+      ? pendingConnectorFrom
+        ? 'crosshair'
+        : 'cell'
+      : 'grab'
 
   return (
     <div ref={containerRef} className="w-full h-full bg-gray-100 relative">
@@ -579,31 +583,29 @@ export default function Canvas({
             onObjectClick={handleObjectClick}
             onStartEditText={onStartEditText}
             onObjectMoved={onObjectMoved}
+            onObjectParentChange={onObjectParentChange}
             onDragStart={onDragStart}
             onDragEnd={onDragEnd}
             onBroadcastDragMove={onBroadcastDragMove}
             onMultiDragMove={onMultiDragMove}
             pendingConnectorFrom={pendingConnectorFrom}
+            onConnectorMoved={onConnectorMoved}
           />
           <Transformer
             ref={transformerRef}
             rotateEnabled={true}
             rotationSnaps={[0, 45, 90, 135, 180, 225, 270, 315]}
+            boundBoxFunc={(oldBox, newBox) => {
+              // Prevent resizing to zero. Use AND so connectors (lines with thin bbox) can resize.
+              const minSize = MIN_OBJECT_SIZE
+              if (newBox.width < minSize && newBox.height < minSize) {
+                return oldBox
+              }
+              if (newBox.width < 1 || newBox.height < 1) return oldBox
+              return newBox
+            }}
             onTransformEnd={handleTransformEnd}
           />
-          {/* Drag-to-select rectangle */}
-          {selectionRect && selectionRect.width > 2 && selectionRect.height > 2 && (
-            <Rect
-              x={selectionRect.x}
-              y={selectionRect.y}
-              width={selectionRect.width}
-              height={selectionRect.height}
-              fill="rgba(37, 99, 235, 0.08)"
-              stroke="#2563eb"
-              strokeWidth={1 / stageScale}
-              listening={false}
-            />
-          )}
           <OtherCursors cursors={cursorList} currentUid={user?.uid ?? null} />
         </Layer>
       </Stage>
@@ -614,7 +616,6 @@ export default function Canvas({
           Now click the target object to connect
         </div>
       )}
-
       {editBounds && (
         <>
           <div

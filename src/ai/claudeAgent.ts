@@ -22,34 +22,67 @@ export async function runAICommand(
   currentObjects: BoardObject[],
   boardId: string
 ): Promise<RunAIResult> {
-  const { data: { session }, error: sessionError } = await supabase?.auth.getSession() ?? { data: { session: null }, error: null }
-
   if (!supabase) {
     return { text: '', error: 'Supabase not configured' }
   }
-  if (sessionError) {
-    return { text: '', error: sessionError.message }
+
+  // Refresh session to avoid "expired" errors — must run before fetching a fresh token
+  const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession()
+
+  if (refreshError) {
+    return { text: '', error: `Session error: ${refreshError.message}. Try signing out and back in.` }
   }
+
+  const session = refreshData?.session ?? (await supabase.auth.getSession()).data?.session
   if (!session?.access_token) {
-    return { text: '', error: 'Please sign in to use AI commands' }
+    return { text: '', error: 'Session expired. Please sign out and sign in again to use AI.' }
   }
 
   const url = getFunctionsUrl()
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${session.access_token}`,
-    },
-    body: JSON.stringify({
-      userMessage: userMessage.trim(),
-      currentObjects,
-      boardId,
-    }),
+  const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+  const body = JSON.stringify({
+    userMessage: userMessage.trim(),
+    currentObjects,
+    boardId,
   })
 
+  let token = session.access_token
+  let res: Response
+  let retried = false
+
+  do {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    }
+    if (anonKey) headers['apikey'] = anonKey
+
+    res = await fetch(url, { method: 'POST', headers, body })
+
+    // Retry once on 401: refresh and try again (handles token expiry race)
+    if (res.status === 401 && !retried) {
+      retried = true
+      const { data: retryData, error: retryError } = await supabase.auth.refreshSession()
+      if (retryError) break
+      const retrySession = retryData?.session ?? (await supabase.auth.getSession()).data?.session
+      if (retrySession?.access_token) {
+        token = retrySession.access_token
+        continue
+      }
+    }
+    break
+  } while (true)
+
   const json = await res.json().catch(() => ({}))
-  const errMsg = (json?.error as string) || (res.status === 401 ? 'Session expired. Please sign in again.' : res.status === 403 ? 'Access denied' : res.status >= 500 ? 'AI service error. Try again later.' : null)
+  const errMsg =
+    (json?.error as string) ||
+    (res.status === 401
+      ? 'Session expired. Please sign out and sign in again.'
+      : res.status === 403
+        ? 'Access denied'
+        : res.status >= 500
+          ? 'AI service error. Try again later.'
+          : null)
 
   if (!res.ok) {
     return { text: '', error: errMsg || `Request failed (${res.status})` }
