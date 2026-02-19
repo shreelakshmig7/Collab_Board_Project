@@ -57,7 +57,8 @@ type CanvasProps = {
   onAfterCreateObject?: () => void
   onBroadcastDragMove?: (id: string, x: number, y: number) => void
   onMultiDragMove?: (movedId: string, deltaX: number, deltaY: number) => void
-  onConnectorCreated?: (fromId: string, toId: string) => void
+  onConnectorCreated?: (fromId: string, toId: string, style?: import('../types/board').ConnectorStyle) => void
+  connectorStyle?: import('../types/board').ConnectorStyle
   onConnectorResized?: (id: string, fromX: number, fromY: number, toX: number, toY: number) => void
   onConnectorMoved?: (id: string, fromX: number, fromY: number, toX: number, toY: number) => void
   onViewportChange?: (center: { x: number; y: number }) => void
@@ -95,6 +96,7 @@ export default function Canvas({
   onConnectorCreated,
   onConnectorResized,
   onConnectorMoved,
+  connectorStyle = 'arrow',
   onViewportChange,
   onSelectionDragStart,
   onSelectionDragMove,
@@ -186,6 +188,9 @@ export default function Canvas({
     pointer: { x: number; y: number }
     stagePos: { x: number; y: number }
   } | null>(null)
+  /** Live pan position during drag; rAF updates state so Stage re-renders with correct position */
+  const panCurrentRef = useRef({ x: 0, y: 0 })
+  const panRafScheduledRef = useRef(false)
 
   useEffect(() => {
     const el = containerRef.current
@@ -329,9 +334,22 @@ export default function Canvas({
 
   }
 
+  const zoomRafScheduledRef = useRef(false)
+  const zoomTargetRef = useRef<{ scale: number; pos: { x: number; y: number } } | null>(null)
+
+  const applyZoomTarget = useCallback(() => {
+    const t = zoomTargetRef.current
+    zoomTargetRef.current = null
+    if (!t) return
+    posRef.current = t.pos
+    scaleRef.current = t.scale
+    setStagePos(t.pos)
+    setStageScale(t.scale)
+  }, [])
+
   const handleWheel = (e: Konva.KonvaEventObject<WheelEvent>) => {
     e.evt.preventDefault()
-    const scaleBy = 1.1
+    const scaleBy = 1.05
     const stage = e.target.getStage()
     if (!stage) return
     const pos = posRef.current
@@ -350,8 +368,14 @@ export default function Canvas({
     }
     posRef.current = newPos
     scaleRef.current = clamped
-    setStageScale(clamped)
-    setStagePos(newPos)
+    zoomTargetRef.current = { scale: clamped, pos: newPos }
+    if (!zoomRafScheduledRef.current) {
+      zoomRafScheduledRef.current = true
+      requestAnimationFrame(() => {
+        applyZoomTarget()
+        zoomRafScheduledRef.current = false
+      })
+    }
   }
 
   const isBackgroundTarget = (target: Konva.Node) =>
@@ -363,7 +387,6 @@ export default function Canvas({
     activeTool === 'sticky' ||
     activeTool === 'rect' ||
     activeTool === 'circle' ||
-    activeTool === 'line' ||
     activeTool === 'frame' ||
     activeTool === 'text'
   const createObjectAtPointer = (stage: Konva.Stage) => {
@@ -392,13 +415,6 @@ export default function Canvas({
         id, type: 'circle',
         x: world.x, y: world.y,
         width: CIRCLE_DIAMETER, height: CIRCLE_DIAMETER,
-        color: DEFAULT_SHAPE_COLOR,
-      }
-    } else if (activeTool === 'line') {
-      newObj = {
-        id, type: 'line',
-        x: world.x, y: world.y,
-        width: LINE_DEFAULT_WIDTH, height: LINE_DEFAULT_HEIGHT,
         color: DEFAULT_SHAPE_COLOR,
       }
     } else if (activeTool === 'frame') {
@@ -443,13 +459,15 @@ export default function Canvas({
     })
   }
 
+  const isConnectorTool = activeTool === 'connector'
+
   const handleObjectClick = useCallback(
     (id: string, shiftKey: boolean) => {
-      if (activeTool === 'connector') {
+      if (isConnectorTool) {
         if (!pendingConnectorFrom) {
           setPendingConnectorFrom(id)
         } else if (pendingConnectorFrom !== id) {
-          onConnectorCreated?.(pendingConnectorFrom, id)
+          onConnectorCreated?.(pendingConnectorFrom, id, connectorStyle)
           setPendingConnectorFrom(null)
           onAfterCreateObject?.()
         }
@@ -465,7 +483,7 @@ export default function Canvas({
         onSelect(selectedIds.length === 1 && selectedIds[0] === id ? [] : [id])
       }
     },
-    [activeTool, pendingConnectorFrom, selectedIds, onSelect, onConnectorCreated, onAfterCreateObject]
+    [isConnectorTool, pendingConnectorFrom, connectorStyle, selectedIds, onSelect, onConnectorCreated, onAfterCreateObject]
   )
 
   const handleStageMouseDown = (e: Konva.KonvaEventObject<MouseEvent>) => {
@@ -508,6 +526,7 @@ export default function Canvas({
     if (!pointer) return
     setIsPanning(true)
     panStartRef.current = { pointer: { ...pointer }, stagePos: { ...stagePos } }
+    panCurrentRef.current = { x: stagePos.x, y: stagePos.y }
   }
 
   const handleStageMouseMove = (e: Konva.KonvaEventObject<MouseEvent>) => {
@@ -539,7 +558,14 @@ export default function Canvas({
     const dy = pointer.y - startPointer.y
     const p = { x: startStagePos.x + dx, y: startStagePos.y + dy }
     posRef.current = p
-    setStagePos(p)
+    panCurrentRef.current = p
+    if (!panRafScheduledRef.current) {
+      panRafScheduledRef.current = true
+      requestAnimationFrame(() => {
+        setStagePos(panCurrentRef.current)
+        panRafScheduledRef.current = false
+      })
+    }
   }
 
   const handleStageMouseUp = () => {
@@ -566,6 +592,9 @@ export default function Canvas({
       setMarqueeCurrent(null)
     }
 
+    if (isPanning) {
+      setStagePos(posRef.current)
+    }
     setIsPanning(false)
     panStartRef.current = null
   }
@@ -593,7 +622,7 @@ export default function Canvas({
     // Click (without drag) on background: create object, clear selection, or cancel connector
     if (isCreateTool) {
       createObjectAtPointer(stage)
-    } else if (activeTool === 'connector') {
+    } else if (isConnectorTool) {
       setPendingConnectorFrom(null)
     } else {
       onSelect([])
@@ -639,7 +668,7 @@ export default function Canvas({
       ? 'grabbing'
       : marqueeStart !== null
         ? 'crosshair'
-        : activeTool === 'connector'
+        : isConnectorTool
           ? pendingConnectorFrom
             ? 'crosshair'
             : 'cell'

@@ -1,3 +1,5 @@
+export type ConnectorStyle = 'arrow' | 'line' | 'dashed' | 'dotted'
+
 export type BoardObject = {
   id: string
   type: 'sticky' | 'rect' | 'circle' | 'line' | 'frame' | 'connector' | 'text'
@@ -21,7 +23,7 @@ export type BoardObject = {
   from_id?: string
   /** Target object id for connector type */
   to_id?: string
-  /** Connector style: 'line' | 'arrow' */
+  /** Connector style: 'arrow' | 'line' | 'dashed' (stored as string from DB) */
   style?: string
   /** Override for connector tail (when user drags endpoint). If set, used instead of computed from object edge. */
   from_x?: number

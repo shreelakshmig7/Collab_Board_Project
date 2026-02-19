@@ -40,9 +40,20 @@ export async function runAICommand(
 
   const url = getFunctionsUrl()
   const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+
+  const messageLC = userMessage.trim().toLowerCase()
+  const isComplexCommand = /arrange|grid|swot|journey|retro|template/.test(messageLC)
+  const isCreationCommand = /create|add|new|put|place|draw|make/.test(messageLC)
+  const isObjectRefCommand = /move|delete|remove|change.*color|update.*color/.test(messageLC)
+
+  const objectsToSend: BoardObject[] =
+    isComplexCommand || isCreationCommand || isObjectRefCommand
+      ? currentObjects
+      : []
+
   const body = JSON.stringify({
     userMessage: userMessage.trim(),
-    currentObjects,
+    currentObjects: objectsToSend,
     boardId,
   })
 

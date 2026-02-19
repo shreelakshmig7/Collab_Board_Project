@@ -5,12 +5,12 @@ import TopBar from './TopBar'
 import Toolbar from './Toolbar'
 import type { Tool } from './Toolbar'
 import Canvas from '../canvas/Canvas'
-import { subscribeObjects, updateObject, deleteObject, deleteAllObjects, addObject } from '../supabase/objects'
+import { subscribeObjects, updateObject, deleteObject, deleteAllObjects, addObject } from '../supabase/objects.ts'
 import { removeAllCursorsForUser } from '../supabase/cursors'
 import { subscribeDragMoves, sendDragMove } from '../supabase/dragBroadcast'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 import { signOut } from '../supabase/auth'
-import type { BoardObject } from '../types/board'
+import type { BoardObject, ConnectorStyle } from '../types/board'
 import { runAICommand } from '../ai/claudeAgent'
 import {
   DEFAULT_CONNECTOR_COLOR,
@@ -21,8 +21,6 @@ import {
   STICKY_WIDTH,
   STICKY_HEIGHT,
   CIRCLE_DIAMETER,
-  LINE_DEFAULT_WIDTH,
-  LINE_DEFAULT_HEIGHT,
   FRAME_DEFAULT_WIDTH,
   FRAME_DEFAULT_HEIGHT,
   TEXT_DEFAULT_FONT_SIZE,
@@ -41,6 +39,7 @@ type BoardPageProps = { user: AppUser; boardId: string; boardName: string; prese
 export default function BoardPage({ user, boardId, boardName, presenceNames }: BoardPageProps) {
   const navigate = useNavigate()
   const [activeTool, setActiveTool] = useState<Tool | null>(null)
+  const [connectorStyle, setConnectorStyle] = useState<ConnectorStyle>('arrow')
   const [objects, setObjects] = useState<BoardObject[]>([])
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -75,11 +74,59 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
   const lastMovedIdsRef = useRef<{ ids: Set<string>; t: number }>({ ids: new Set(), t: 0 })
   const DRAG_GUARD_MS = 600
 
-  const handleObjectMoved = useCallback((id: string, x: number, y: number) => {
-    lastMovedIdsRef.current.ids.add(id)
-    lastMovedIdsRef.current.t = Date.now()
-    setObjects((prev) => prev.map((o) => (o.id === id ? { ...o, x, y } : o)))
-  }, [])
+  /** Clear connector endpoint overrides when a connected object moves so connectors stay attached (Option C). */
+  const clearConnectorOverridesFor = useCallback(
+    (movedIds: string[]) => {
+      if (movedIds.length === 0) return
+      const movedSet = new Set(movedIds)
+      setObjects((prev) => {
+        const next = [...prev]
+        let changed = false
+        for (let i = 0; i < next.length; i++) {
+          const o = next[i]
+          if (o.type !== 'connector') continue
+          const attached = (o.from_id && movedSet.has(o.from_id)) || (o.to_id && movedSet.has(o.to_id))
+          if (!attached) continue
+          if (o.from_x !== undefined || o.from_y !== undefined || o.to_x !== undefined || o.to_y !== undefined) {
+            const { from_x, from_y, to_x, to_y, ...rest } = o
+            next[i] = rest as BoardObject
+            changed = true
+            updateObject(boardId, o.id, { from_x: null, from_y: null, to_x: null, to_y: null }).catch((err: unknown) =>
+              console.error('Failed to clear connector overrides', err)
+            )
+          }
+        }
+        return changed ? next : prev
+      })
+    },
+    [boardId]
+  )
+
+  const handleObjectMoved = useCallback(
+    (id: string, x: number, y: number) => {
+      lastMovedIdsRef.current.ids.add(id)
+      lastMovedIdsRef.current.t = Date.now()
+      setObjects((prev) => {
+        const next = prev.map((o) => (o.id === id ? { ...o, x, y } : o))
+        const movedSet = new Set([id])
+        for (let i = 0; i < next.length; i++) {
+          const o = next[i]
+          if (o.type !== 'connector') continue
+          const attached = (o.from_id && movedSet.has(o.from_id)) || (o.to_id && movedSet.has(o.to_id))
+          if (!attached) continue
+          if (o.from_x !== undefined || o.from_y !== undefined || o.to_x !== undefined || o.to_y !== undefined) {
+            const { from_x, from_y, to_x, to_y, ...rest } = o
+            next[i] = rest as BoardObject
+            updateObject(boardId, o.id, { from_x: null, from_y: null, to_x: null, to_y: null }).catch((err: unknown) =>
+              console.error('Failed to clear connector overrides', err)
+            )
+          }
+        }
+        return next
+      })
+    },
+    [boardId]
+  )
 
   const handleObjectParentChange = useCallback((id: string, parentId: string | null) => {
     setObjects((prev) =>
@@ -126,10 +173,11 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
         }
         return prev
       })
+      clearConnectorOverridesFor(selectedIds)
     }
     draggingIdRef.current = null
     dragStartPositionsRef.current = new Map()
-  }, [boardId, selectedIds])
+  }, [boardId, selectedIds, clearConnectorOverridesFor])
 
   /** Called during multi-drag: move all selected objects (including the dragged one) by the same delta so state stays in sync and the dragged object does not snap back on re-render */
   const handleMultiDragMove = useCallback(
@@ -185,14 +233,16 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
 
   const handleSelectionDragEnd = useCallback(() => {
     const toPersist = selectionDragLastPositionsRef.current
+    const movedIds = Array.from(toPersist.keys())
     for (const [id, pos] of toPersist) {
       updateObject(boardId, id, { x: pos.x, y: pos.y }).catch((err: unknown) =>
         console.error('Failed to update object position after selection drag', err)
       )
     }
+    clearConnectorOverridesFor(movedIds)
     dragStartPositionsRef.current = new Map()
     selectionDragLastPositionsRef.current = new Map()
-  }, [boardId])
+  }, [boardId, clearConnectorOverridesFor])
 
   const lastLocalResizeRef = useRef<{ id: string; t: number }>({ id: '', t: 0 })
   const draggingIdRef = useRef<string | null>(null)
@@ -236,7 +286,7 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
   }, [])
 
   const handleRealtimeObjectChange = useCallback(
-    (change: import('../supabase/objects').RealtimeObjectChange) => {
+    (change: import('../supabase/objects.ts').RealtimeObjectChange) => {
       if (change.event === 'DELETE') {
         setObjects((prev) => prev.filter((o) => o.id !== change.old.id))
         return
@@ -284,7 +334,7 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
     setSelectedIds([])
   }, [boardId])
 
-  const shouldScheduleRefetch = useCallback((change: import('../supabase/objects').RealtimeObjectChange) => {
+  const shouldScheduleRefetch = useCallback((change: import('../supabase/objects.ts').RealtimeObjectChange) => {
     if (change.event !== 'UPDATE') return true
     const { ids, t } = lastMovedIdsRef.current
     if (ids.has(change.new.id) && Date.now() - t < DRAG_GUARD_MS) return false
@@ -402,16 +452,16 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
     [boardId]
   )
 
-  /** Handle connector creation between two objects */
+  /** Handle connector creation between two objects (style from connector tool picker) */
   const handleConnectorCreated = useCallback(
-    (fromId: string, toId: string) => {
+    (fromId: string, toId: string, style: ConnectorStyle = 'arrow') => {
       const id = crypto.randomUUID()
       const connector: BoardObject = {
         id,
         type: 'connector',
         from_id: fromId,
         to_id: toId,
-        style: 'arrow',
+        style,
         color: DEFAULT_CONNECTOR_COLOR,
         x: 0,
         y: 0,
@@ -425,6 +475,26 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
       })
     },
     [boardId]
+  )
+
+  /** When connector tool active: set default style. When connector(s) selected: update their style and persist. */
+  const handleConnectorStyleChange = useCallback(
+    (style: ConnectorStyle) => {
+      const selectedConnectorIds = selectedIds.filter(
+        (id) => objects.find((o) => o.id === id)?.type === 'connector'
+      )
+      if (selectedConnectorIds.length > 0) {
+        for (const id of selectedConnectorIds) {
+          setObjects((prev) => prev.map((o) => (o.id === id ? { ...o, style } : o)))
+          updateObject(boardId, id, { style }).catch((err: unknown) =>
+            console.error('Failed to update connector style', err)
+          )
+        }
+      } else {
+        setConnectorStyle(style)
+      }
+    },
+    [boardId, selectedIds, objects]
   )
 
   useEffect(() => {
@@ -554,7 +624,7 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
 
   /** Create object at viewport center when user clicks a create tool button */
   const handleCreateFromToolbar = useCallback(
-    (tool: 'sticky' | 'rect' | 'circle' | 'line' | 'frame' | 'text') => {
+    (tool: 'sticky' | 'rect' | 'circle' | 'frame' | 'text') => {
       const { x, y } = viewportCenterRef.current
       const id = crypto.randomUUID()
       let newObj: BoardObject
@@ -564,8 +634,6 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
         newObj = { id, type: 'rect', x, y, width: STICKY_WIDTH, height: STICKY_HEIGHT, color: DEFAULT_SHAPE_COLOR }
       } else if (tool === 'circle') {
         newObj = { id, type: 'circle', x, y, width: CIRCLE_DIAMETER, height: CIRCLE_DIAMETER, color: DEFAULT_SHAPE_COLOR }
-      } else if (tool === 'line') {
-        newObj = { id, type: 'line', x, y, width: LINE_DEFAULT_WIDTH, height: LINE_DEFAULT_HEIGHT, color: DEFAULT_SHAPE_COLOR }
       } else if (tool === 'frame') {
         newObj = { id, type: 'frame', x, y, width: FRAME_DEFAULT_WIDTH, height: FRAME_DEFAULT_HEIGHT, text: 'Frame', color: DEFAULT_FRAME_COLOR }
       } else {
@@ -646,6 +714,14 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
         activeTool={activeTool}
         onToolChange={setActiveTool}
         onCreateClick={handleCreateFromToolbar}
+        connectorStyle={
+          selectedObject?.type === 'connector'
+            ? (['arrow', 'line', 'dashed', 'dotted'].includes(selectedObject.style ?? '')
+                ? (selectedObject.style as ConnectorStyle)
+                : 'arrow')
+            : connectorStyle
+        }
+        onConnectorStyleChange={handleConnectorStyleChange}
         selectedIds={selectedIds}
         selectedObject={selectedObject}
         selectedColorableId={selectedColorableId}
@@ -664,6 +740,7 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
           boardId={boardId}
           user={user}
           activeTool={activeTool}
+          connectorStyle={connectorStyle}
           objects={objects}
           selectedIds={selectedIds}
           onSelect={setSelectedIds}

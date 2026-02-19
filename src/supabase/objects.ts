@@ -149,10 +149,19 @@ export async function addObject(boardId: string, obj: BoardObject): Promise<void
   if (error) throw error
 }
 
+/** Payload to clear connector endpoint overrides (re-attach to objects). */
+export type ClearConnectorOverridesPayload = {
+  from_x: null
+  from_y: null
+  to_x: null
+  to_y: null
+}
+
+/** Connector endpoint overrides can be set to null to clear (re-attach to objects). */
 export async function updateObject(
   boardId: string,
   id: string,
-  partial: Partial<BoardObject>
+  partial: Partial<BoardObject> | ClearConnectorOverridesPayload
 ): Promise<void> {
   const row: Record<string, unknown> = { updated_at: new Date().toISOString() }
   if (partial.x !== undefined) row.x = partial.x
@@ -167,10 +176,10 @@ export async function updateObject(
   if (partial.from_id !== undefined) row.from_id = partial.from_id
   if (partial.to_id !== undefined) row.to_id = partial.to_id
   if (partial.style !== undefined) row.style = partial.style
-  if (partial.from_x !== undefined) row.from_x = partial.from_x
-  if (partial.from_y !== undefined) row.from_y = partial.from_y
-  if (partial.to_x !== undefined) row.to_x = partial.to_x
-  if (partial.to_y !== undefined) row.to_y = partial.to_y
+  if ('from_x' in partial) row.from_x = partial.from_x ?? null
+  if ('from_y' in partial) row.from_y = partial.from_y ?? null
+  if ('to_x' in partial) row.to_x = partial.to_x ?? null
+  if ('to_y' in partial) row.to_y = partial.to_y ?? null
   if (partial.font_size !== undefined) row.font_size = partial.font_size
   if (partial.font_color !== undefined) row.font_color = partial.font_color
   const { error } = await requireSupabase()

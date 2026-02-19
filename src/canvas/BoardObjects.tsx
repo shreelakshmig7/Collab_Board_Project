@@ -11,7 +11,7 @@ import {
   TEXT_DEFAULT_FONT_SIZE,
   MIN_OBJECT_SIZE,
 } from '../constants'
-import { updateObject } from '../supabase/objects'
+import { updateObject } from '../supabase/objects.ts'
 
 const DRAG_UPDATE_THROTTLE_MS = 40
 /** Slower throttle for nested frames to reduce lag/flash during drag */
@@ -1509,16 +1509,20 @@ function BoardObjects({
         const height = toY - fromY
         const isSelected = selectedIds.includes(obj.id)
         const strokeColor = obj.color ?? DEFAULT_CONNECTOR_COLOR
-        const isArrow = obj.style !== 'line'
+        const isArrow = obj.style === 'arrow'
+        const isDashed = obj.style === 'dashed'
+        const isDotted = obj.style === 'dotted'
 
         const linePoints: [number, number, number, number] = [0, 0, width, height]
         const sharedLineProps = {
           points: linePoints,
           stroke: isSelected ? '#2563eb' : strokeColor,
-          strokeWidth: isSelected ? 5 : 4,
-          hitStrokeWidth: 28,
+          strokeWidth: isSelected ? 10 : 8,
+          hitStrokeWidth: 40,
           lineCap: 'round' as const,
           listening: true,
+          ...(isDashed && { dash: [10, 12] }),
+          ...(isDotted && { dash: [0, 14] }),
         }
 
         return (
@@ -1549,8 +1553,8 @@ function BoardObjects({
               <Arrow
                 {...sharedLineProps}
                 fill={isSelected ? '#2563eb' : strokeColor}
-                pointerLength={12}
-                pointerWidth={10}
+                pointerLength={14}
+                pointerWidth={12}
                 pointerAtEnding
               />
             ) : (

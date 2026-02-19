@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import type { BoardObject } from '../types/board'
+import type { BoardObject, ConnectorStyle } from '../types/board'
 
 export type Tool = 'select' | 'sticky' | 'rect' | 'circle' | 'line' | 'frame' | 'text' | 'connector'
 
@@ -8,13 +8,15 @@ const COLORS = ['#FEF08A', '#FECACA', '#BBF7D0', '#BFDBFE', '#E9D5FF', '#FED7AA'
 const MIN_SIZE = 20
 const MAX_SIZE = 800
 
-const CREATE_TOOLS = ['sticky', 'rect', 'circle', 'line', 'frame', 'text'] as const
+const CREATE_TOOLS = ['sticky', 'rect', 'circle', 'frame', 'text'] as const
 type CreateTool = (typeof CREATE_TOOLS)[number]
 
 type ToolbarProps = {
   activeTool: Tool | null
   onToolChange: (tool: Tool | null) => void
   onCreateClick?: (tool: CreateTool) => void
+  connectorStyle: ConnectorStyle
+  onConnectorStyleChange: (style: ConnectorStyle) => void
   selectedIds: string[]
   selectedObject: BoardObject | null
   selectedColorableId: string | null
@@ -36,10 +38,19 @@ function toolBtn(active: boolean) {
   }`
 }
 
+const CONNECTOR_STYLES: { value: ConnectorStyle; label: string }[] = [
+  { value: 'arrow', label: 'Arrow' },
+  { value: 'line', label: 'Line' },
+  { value: 'dashed', label: 'Dashed' },
+  { value: 'dotted', label: 'Dotted' },
+]
+
 export default function Toolbar({
   activeTool,
   onToolChange,
   onCreateClick,
+  connectorStyle,
+  onConnectorStyleChange,
   selectedIds,
   selectedObject,
   selectedColorableId,
@@ -108,19 +119,37 @@ export default function Toolbar({
         <button type="button" onClick={() => handleToolClick('circle')} className={toolBtn(activeTool === 'circle')}>
           Circle
         </button>
-        <button type="button" onClick={() => handleToolClick('line')} className={toolBtn(activeTool === 'line')}>
-          Line
-        </button>
         <button type="button" onClick={() => handleToolClick('frame')} className={toolBtn(activeTool === 'frame')}>
           Frame
         </button>
         <button type="button" onClick={() => handleToolClick('text')} className={toolBtn(activeTool === 'text')}>
           Text
         </button>
-        <button type="button" onClick={() => onToolChange('connector')} className={toolBtn(activeTool === 'connector')}>
+        <button type="button" onClick={() => handleToolClick('connector')} className={toolBtn(activeTool === 'connector')}>
           Connector
         </button>
       </div>
+      {/* Connector style picker: Arrow | Line | Dashed (when Connector tool active or a connector is selected) */}
+      {(activeTool === 'connector' || selectedObject?.type === 'connector') && (
+        <div className="flex items-center gap-1">
+          <span className="text-xs text-gray-500">Style:</span>
+          {CONNECTOR_STYLES.map(({ value, label }) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => onConnectorStyleChange(value)}
+              aria-label={`Connector style: ${label}`}
+              className={`px-2 py-1 text-xs rounded border transition-colors focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 focus:outline-none ${
+                connectorStyle === value
+                  ? 'bg-blue-100 border-blue-300 text-blue-800 font-medium'
+                  : 'bg-gray-100 border-gray-200 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Separator */}
       <div className="h-6 w-px bg-gray-200" />
