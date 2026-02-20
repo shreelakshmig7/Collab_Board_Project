@@ -164,24 +164,25 @@ export async function updateObject(
   partial: Partial<BoardObject> | ClearConnectorOverridesPayload
 ): Promise<void> {
   const row: Record<string, unknown> = { updated_at: new Date().toISOString() }
-  if (partial.x !== undefined) row.x = partial.x
-  if (partial.y !== undefined) row.y = partial.y
-  if (partial.width !== undefined) row.width = partial.width
-  if (partial.height !== undefined) row.height = partial.height
-  if (partial.text !== undefined) row.text = partial.text
-  if (partial.body_text !== undefined) row.body_text = partial.body_text
-  if (partial.color !== undefined) row.color = partial.color
-  if (partial.rotation !== undefined) row.rotation = partial.rotation
+  const p = partial as Partial<BoardObject>
+  if (p.x !== undefined) row.x = p.x
+  if (p.y !== undefined) row.y = p.y
+  if (p.width !== undefined) row.width = p.width
+  if (p.height !== undefined) row.height = p.height
+  if (p.text !== undefined) row.text = p.text
+  if (p.body_text !== undefined) row.body_text = p.body_text
+  if (p.color !== undefined) row.color = p.color
+  if (p.rotation !== undefined) row.rotation = p.rotation
   if ('parent_id' in partial) row.parent_id = partial.parent_id ?? null
-  if (partial.from_id !== undefined) row.from_id = partial.from_id
-  if (partial.to_id !== undefined) row.to_id = partial.to_id
-  if (partial.style !== undefined) row.style = partial.style
+  if (p.from_id !== undefined) row.from_id = p.from_id
+  if (p.to_id !== undefined) row.to_id = p.to_id
+  if (p.style !== undefined) row.style = p.style
   if ('from_x' in partial) row.from_x = partial.from_x ?? null
   if ('from_y' in partial) row.from_y = partial.from_y ?? null
   if ('to_x' in partial) row.to_x = partial.to_x ?? null
   if ('to_y' in partial) row.to_y = partial.to_y ?? null
-  if (partial.font_size !== undefined) row.font_size = partial.font_size
-  if (partial.font_color !== undefined) row.font_color = partial.font_color
+  if (p.font_size !== undefined) row.font_size = p.font_size
+  if (p.font_color !== undefined) row.font_color = p.font_color
   const { error } = await requireSupabase()
     .from(TABLE)
     .update(row)
