@@ -34,6 +34,8 @@ type CanvasProps = {
   boardId: string
   user: AppUser
   activeTool: Tool | null
+  pendingConnectorFrom?: string | null
+  onPendingConnectorFromChange?: (id: string | null) => void
   onPresenceChange?: (names: string[]) => void
   objects: BoardObject[]
   selectedIds: string[]
@@ -64,6 +66,8 @@ type CanvasProps = {
   onSelectionDragStart?: (worldPos: { x: number; y: number }) => void
   onSelectionDragMove?: (deltaX: number, deltaY: number) => void
   onSelectionDragEnd?: () => void
+  /** Called when user clicks empty canvas (e.g. to deselect Select tool). */
+  onEmptyCanvasClick?: () => void
   isViewOnly?: boolean
 }
 
@@ -71,6 +75,8 @@ export default function Canvas({
   boardId,
   user,
   activeTool,
+  pendingConnectorFrom: pendingConnectorFromProp = null,
+  onPendingConnectorFromChange,
   onPresenceChange,
   objects,
   selectedIds,
@@ -100,6 +106,7 @@ export default function Canvas({
   onSelectionDragStart,
   onSelectionDragMove,
   onSelectionDragEnd,
+  onEmptyCanvasClick,
   isViewOnly = false,
 }: CanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -119,8 +126,20 @@ export default function Canvas({
   scaleRef.current = stageScale
 
 
-  // Connector tool: pending first object click
-  const [pendingConnectorFrom, setPendingConnectorFrom] = useState<string | null>(null)
+  // Connector tool: pending first object click (controlled from parent when onPendingConnectorFromChange provided)
+  const [pendingConnectorFromLocal, setPendingConnectorFromLocal] = useState<string | null>(null)
+  const pendingConnectorFrom = onPendingConnectorFromChange != null ? pendingConnectorFromProp ?? null : pendingConnectorFromLocal
+  const setPendingConnectorFrom = useCallback(
+    (id: string | null) => {
+      if (onPendingConnectorFromChange) onPendingConnectorFromChange(id)
+      else setPendingConnectorFromLocal(id)
+    },
+    [onPendingConnectorFromChange]
+  )
+  // Screen position for "Select target node" tooltip (follows cursor)
+  const [cursorScreenPos, setCursorScreenPos] = useState<{ x: number; y: number } | null>(null)
+  // Suppress second click of double-click so only edit runs (double-click = edit; does not apply to connector)
+  const lastObjectClickRef = useRef<{ id: string; t: number }>({ id: '', t: 0 })
 
   // Marquee (drag-to-select) in select tool: start and current pointer in world coords
   const [marqueeStart, setMarqueeStart] = useState<{ x: number; y: number } | null>(null)
@@ -134,6 +153,15 @@ export default function Canvas({
   const lastCursorPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 })
   const cursorThrottleRef = useRef(0)
   const hasReceivedFirstCursorsRef = useRef(false)
+
+  // Clear connector flow when user switches to another tool
+  useEffect(() => {
+    if (activeTool !== 'connector') {
+      setPendingConnectorFrom(null)
+      setCursorScreenPos(null)
+    }
+  }, [activeTool])
+
   useEffect(() => {
     hasReceivedFirstCursorsRef.current = false
     const CURSOR_THROTTLE_MS = 80
@@ -332,6 +360,10 @@ export default function Canvas({
     if (!world) return
     sendCursor(world.x, world.y)
 
+    // Update cursor position for connector "Select target node" tooltip
+    if (activeTool === 'connector' && pendingConnectorFrom) {
+      setCursorScreenPos({ x: e.evt.clientX, y: e.evt.clientY })
+    }
   }
 
   const zoomRafScheduledRef = useRef(false)
@@ -401,7 +433,7 @@ export default function Canvas({
         id, type: 'sticky',
         x: world.x, y: world.y,
         width: STICKY_WIDTH, height: STICKY_HEIGHT,
-        text: 'New note', color: DEFAULT_STICKY_COLOR,
+        text: '', color: DEFAULT_STICKY_COLOR,
       }
     } else if (activeTool === 'rect') {
       newObj = {
@@ -422,7 +454,7 @@ export default function Canvas({
         id, type: 'frame',
         x: world.x, y: world.y,
         width: FRAME_DEFAULT_WIDTH, height: FRAME_DEFAULT_HEIGHT,
-        text: 'Frame', color: DEFAULT_FRAME_COLOR,
+        text: '', color: DEFAULT_FRAME_COLOR,
       }
     } else {
       // text
@@ -430,7 +462,7 @@ export default function Canvas({
         id, type: 'text',
         x: world.x, y: world.y,
         width: 200, height: 80,
-        text: 'Text', font_size: TEXT_DEFAULT_FONT_SIZE,
+        text: '', font_size: TEXT_DEFAULT_FONT_SIZE,
         font_color: DEFAULT_TEXT_COLOR,
       }
     }
@@ -469,11 +501,20 @@ export default function Canvas({
         } else if (pendingConnectorFrom !== id) {
           onConnectorCreated?.(pendingConnectorFrom, id, connectorStyle)
           setPendingConnectorFrom(null)
+          setCursorScreenPos(null)
           onAfterCreateObject?.()
         }
         return
       }
-      if (activeTool !== 'select') return
+      // Single click = select (any tool). Double-click = edit (handled by onDblClick in BoardObjects; not for connector).
+      const obj = objects.find((o) => o.id === id)
+      const isConnectorObject = obj?.type === 'connector'
+      const now = Date.now()
+      if (!isConnectorObject && id === lastObjectClickRef.current.id && now - lastObjectClickRef.current.t < 400) {
+        lastObjectClickRef.current = { id: '', t: 0 }
+        return
+      }
+      lastObjectClickRef.current = { id, t: now }
       if (shiftKey) {
         if (selectedIds.includes(id)) {
           onSelect(selectedIds.filter((sid) => sid !== id))
@@ -484,7 +525,7 @@ export default function Canvas({
         onSelect(selectedIds.length === 1 && selectedIds[0] === id ? [] : [id])
       }
     },
-    [activeTool, isConnectorTool, pendingConnectorFrom, connectorStyle, selectedIds, onSelect, onConnectorCreated, onAfterCreateObject]
+    [isConnectorTool, pendingConnectorFrom, connectorStyle, objects, selectedIds, onSelect, onConnectorCreated, onAfterCreateObject]
   )
 
   const handleStageMouseDown = (e: Konva.KonvaEventObject<MouseEvent>) => {
@@ -613,6 +654,7 @@ export default function Canvas({
     // Avoid clearing selection when this click is the release after a marquee or selection drag
     if (justAppliedMarqueeRef.current) {
       justAppliedMarqueeRef.current = false
+      onEmptyCanvasClick?.()
       return
     }
     if (justAppliedSelectionDragRef.current) {
@@ -625,8 +667,10 @@ export default function Canvas({
       createObjectAtPointer(stage)
     } else if (isConnectorTool) {
       setPendingConnectorFrom(null)
+      setCursorScreenPos(null)
     } else {
       onSelect([])
+      onEmptyCanvasClick?.()
     }
   }
 
@@ -798,10 +842,15 @@ export default function Canvas({
         </Layer>
       </Stage>
 
-      {/* Pending connector hint */}
-      {pendingConnectorFrom && (
-        <div className="absolute left-1/2 -translate-x-1/2 bottom-4 px-4 py-2 bg-amber-500 text-white text-sm rounded-full shadow-lg pointer-events-none z-50">
-          Now click the target object to connect
+      {/* Connector target tooltip: follows cursor after source is selected (source tooltip is in Toolbar) */}
+      {pendingConnectorFrom && cursorScreenPos && (
+        <div
+          className="fixed px-3 py-1.5 bg-slate-700 text-white text-sm rounded-lg shadow-lg pointer-events-none z-50 whitespace-nowrap"
+          style={{ left: cursorScreenPos.x + 16, top: cursorScreenPos.y + 16 }}
+          role="status"
+          aria-live="polite"
+        >
+          Select target node
         </div>
       )}
       {editBounds && (
@@ -845,6 +894,7 @@ export default function Canvas({
           >
             <textarea
               value={editingText}
+              placeholder="Type here"
               onChange={(e) => onEditingTextChange?.(e.target.value)}
               onBlur={() => onSaveEdit?.()}
               onKeyDown={(e) => {

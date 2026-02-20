@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { AppUser } from '../types/user'
 import { listBoards, createBoard, deleteBoard, updateBoard } from '../supabase/boards'
+import { validateBoardName, sanitizeBoardName } from '../utils/inputValidation'
 import type { Board } from '../supabase/boards'
 import { signOut } from '../supabase/auth'
 import { deleteAllObjects } from '../supabase/objects'
@@ -26,6 +27,8 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
   const [showRenameModal, setShowRenameModal] = useState(false)
   const [renameValue, setRenameValue] = useState('')
   const [renaming, setRenaming] = useState(false)
+  const [createValidationError, setCreateValidationError] = useState<string | null>(null)
+  const [renameValidationError, setRenameValidationError] = useState<string | null>(null)
   const navigate = useNavigate()
 
   const myBoards = boards.filter((b) => b.user_id === user.uid)
@@ -50,8 +53,13 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
 
   const handleCreateBoard = async (e: React.FormEvent) => {
     e.preventDefault()
-    const name = newBoardName.trim()
-    if (!name) return
+    const name = sanitizeBoardName(newBoardName)
+    const result = validateBoardName(name)
+    if (!result.valid) {
+      setCreateValidationError(result.error ?? 'Invalid board name')
+      return
+    }
+    setCreateValidationError(null)
     setError(null)
     setCreating(true)
     try {
@@ -64,6 +72,11 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
     } finally {
       setCreating(false)
     }
+  }
+
+  const handleNewBoardNameChange = (value: string) => {
+    setNewBoardName(value)
+    setCreateValidationError(null)
   }
 
   const toggleSelection = (boardId: string) => {
@@ -90,7 +103,7 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
     const ids = Array.from(selectedIds)
     try {
       for (const boardId of ids) {
-        await deleteAllObjects(boardId)
+        await deleteAllObjects(boardId, user.uid)
         await deleteCursorsForBoard(boardId)
         await deleteBoard(boardId)
       }
@@ -116,9 +129,15 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
 
   const handleRenameSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    const name = renameValue.trim()
-    if (selectedIds.size !== 1 || !name) return
+    const name = sanitizeBoardName(renameValue)
+    if (selectedIds.size !== 1) return
+    const result = validateBoardName(name)
+    if (!result.valid) {
+      setRenameValidationError(result.error ?? 'Invalid board name')
+      return
+    }
     const boardId = Array.from(selectedIds)[0]
+    setRenameValidationError(null)
     setError(null)
     setRenaming(true)
     try {
@@ -131,6 +150,11 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
     } finally {
       setRenaming(false)
     }
+  }
+
+  const handleRenameValueChange = (value: string) => {
+    setRenameValue(value)
+    setRenameValidationError(null)
   }
 
   const renameBoardId = showRenameModal ? Array.from(selectedIds)[0] : null
@@ -194,7 +218,7 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
             </div>
           ) : (
             <form onSubmit={handleCreateBoard} className="flex flex-wrap items-end gap-3">
-              <div className="flex-1 min-w-[200px]">
+              <div className="flex-1 min-w-[200px] relative">
                 <label htmlFor="new-board-name" className="block text-sm font-medium text-gray-700 mb-1">
                   Board name
                 </label>
@@ -202,13 +226,24 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
                   id="new-board-name"
                   type="text"
                   value={newBoardName}
-                  onChange={(e) => setNewBoardName(e.target.value)}
+                  onChange={(e) => handleNewBoardNameChange(e.target.value)}
                   placeholder="Enter board name…"
                   autoComplete="off"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:border-transparent"
+                  className={`w-full px-4 py-2 border rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:border-transparent ${createValidationError ? 'border-red-500' : 'border-gray-300'}`}
                   autoFocus
                   disabled={creating}
+                  aria-invalid={!!createValidationError}
+                  aria-describedby={createValidationError ? 'new-board-name-error' : undefined}
                 />
+                {createValidationError && (
+                  <div
+                    id="new-board-name-error"
+                    role="alert"
+                    className="absolute left-0 top-full mt-1 z-50 px-3 py-2 text-sm text-white bg-gray-800 rounded-lg shadow-lg max-w-[280px]"
+                  >
+                    {createValidationError}
+                  </div>
+                )}
               </div>
               <button
                 type="submit"
@@ -222,6 +257,7 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
                 onClick={() => {
                   setShowNewBoardForm(false)
                   setNewBoardName('')
+                  setCreateValidationError(null)
                   setError(null)
                 }}
                 className="px-5 py-2.5 text-gray-600 font-medium rounded-xl hover:bg-gray-100"
@@ -344,26 +380,40 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
                 Rename board
               </h2>
               <form onSubmit={handleRenameSubmit} className="space-y-4">
-                <label htmlFor="rename-board-input" className="sr-only">
-                  Board name
-                </label>
-                <input
-                  id="rename-board-input"
-                  type="text"
-                  value={renameValue}
-                  onChange={(e) => setRenameValue(e.target.value)}
-                  placeholder="Board name…"
-                  autoComplete="off"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:border-transparent"
-                  autoFocus
-                  disabled={renaming}
-                />
+                <div className="relative">
+                  <label htmlFor="rename-board-input" className="sr-only">
+                    Board name
+                  </label>
+                  <input
+                    id="rename-board-input"
+                    type="text"
+                    value={renameValue}
+                    onChange={(e) => handleRenameValueChange(e.target.value)}
+                    placeholder="Board name…"
+                    autoComplete="off"
+                    className={`w-full px-4 py-2 border rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:border-transparent ${renameValidationError ? 'border-red-500' : 'border-gray-300'}`}
+                    autoFocus
+                    disabled={renaming}
+                    aria-invalid={!!renameValidationError}
+                    aria-describedby={renameValidationError ? 'rename-board-input-error' : undefined}
+                  />
+                  {renameValidationError && (
+                    <div
+                      id="rename-board-input-error"
+                      role="alert"
+                      className="absolute left-0 top-full mt-1 z-[210] px-3 py-2 text-sm text-white bg-gray-800 rounded-lg shadow-lg max-w-[280px]"
+                    >
+                      {renameValidationError}
+                    </div>
+                  )}
+                </div>
                 <div className="flex gap-3 justify-end">
                   <button
                     type="button"
                     onClick={() => {
                       setShowRenameModal(false)
                       setRenameValue('')
+                      setRenameValidationError(null)
                     }}
                     disabled={renaming}
                     className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-xl hover:bg-gray-200 disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus:outline-none"

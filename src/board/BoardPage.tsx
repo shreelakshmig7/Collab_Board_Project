@@ -1,3 +1,4 @@
+/** Board page: main whiteboard view with toolbar, canvas, object selection, and AI assistant panel. */
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { AppUser } from '../types/user'
@@ -30,6 +31,7 @@ import {
   FRAME_DEFAULT_HEIGHT,
   TEXT_DEFAULT_FONT_SIZE,
 } from '../constants'
+import { validateAIPrompt, sanitizeAIPrompt, validateObjectText, sanitizeObjectText } from '../utils/inputValidation'
 
 function GeminiIcon({ className }: { className?: string }) {
   return (
@@ -45,6 +47,7 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
   const navigate = useNavigate()
   const [activeTool, setActiveTool] = useState<Tool | null>(null)
   const [connectorStyle, setConnectorStyle] = useState<ConnectorStyle>('arrow')
+  const [pendingConnectorFrom, setPendingConnectorFrom] = useState<string | null>(null)
   const [objects, setObjects] = useState<BoardObject[]>([])
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -52,6 +55,7 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
   const [editingText, setEditingText] = useState('')
   const [showAIPanel, setShowAIPanel] = useState(false)
   const [aiPrompt, setAiPrompt] = useState('')
+  const [aiPromptValidationError, setAiPromptValidationError] = useState<string | null>(null)
   const [aiChatMessages, setAiChatMessages] = useState<
     { role: 'user' | 'assistant'; content: string; isError?: boolean }[]
   >([])
@@ -192,7 +196,6 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
   const handleDragStart = useCallback(
     (id: string) => {
       draggingIdRef.current = id
-      // Store start positions for all selected objects (for multi-drag)
       if (selectedIds.includes(id) && selectedIds.length > 1) {
         setObjects((prev) => {
           const positions = new Map<string, { x: number; y: number }>()
@@ -215,7 +218,6 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
       lastMovedIdsRef.current.ids.add(id)
       lastMovedIdsRef.current.t = Date.now()
     }
-    // Persist all selected objects' positions (multi-drag may have moved others only in state)
     if (selectedIds.length > 0) {
       setObjects((prev) => {
         for (const selId of selectedIds) {
@@ -614,7 +616,10 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
     }
     const id = editingId
     const part = editingPart
-    const newText = editingText
+    const rawText = editingText
+    const textResult = validateObjectText(rawText)
+    if (!textResult.valid) return
+    const newText = sanitizeObjectText(rawText)
     const obj = objects.find((o) => o.id === id)
     const prevText = part === 'body' ? (obj?.body_text ?? '') : (obj?.text ?? '')
     setEditingId(null)
@@ -649,13 +654,12 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
 
   const handleColorChange = useCallback(
     (color: string) => {
-      // Apply to all selected objects
-    for (const id of selectedIds) {
-      setObjects((prev) => prev.map((o) => (o.id === id ? { ...o, color } : o)))
-      updateObject(boardId, id, { color }).catch((err: unknown) =>
-        console.error('Failed to update color', err)
-      )
-    }
+      for (const id of selectedIds) {
+        setObjects((prev) => prev.map((o) => (o.id === id ? { ...o, color } : o)))
+        updateObject(boardId, id, { color }).catch((err: unknown) =>
+          console.error('Failed to update color', err)
+        )
+      }
     },
     [boardId, selectedIds]
   )
@@ -685,15 +689,15 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
       const id = crypto.randomUUID()
       let newObj: BoardObject
       if (tool === 'sticky') {
-        newObj = { id, type: 'sticky', x, y, width: STICKY_WIDTH, height: STICKY_HEIGHT, text: 'New note', color: DEFAULT_STICKY_COLOR }
+        newObj = { id, type: 'sticky', x, y, width: STICKY_WIDTH, height: STICKY_HEIGHT, text: '', color: DEFAULT_STICKY_COLOR }
       } else if (tool === 'rect') {
         newObj = { id, type: 'rect', x, y, width: STICKY_WIDTH, height: STICKY_HEIGHT, color: DEFAULT_SHAPE_COLOR }
       } else if (tool === 'circle') {
         newObj = { id, type: 'circle', x, y, width: CIRCLE_DIAMETER, height: CIRCLE_DIAMETER, color: DEFAULT_SHAPE_COLOR }
       } else if (tool === 'frame') {
-        newObj = { id, type: 'frame', x, y, width: FRAME_DEFAULT_WIDTH, height: FRAME_DEFAULT_HEIGHT, text: 'Frame', color: DEFAULT_FRAME_COLOR }
+        newObj = { id, type: 'frame', x, y, width: FRAME_DEFAULT_WIDTH, height: FRAME_DEFAULT_HEIGHT, text: '', color: DEFAULT_FRAME_COLOR }
       } else {
-        newObj = { id, type: 'text', x, y, width: 200, height: 80, text: 'Text', font_size: TEXT_DEFAULT_FONT_SIZE, font_color: DEFAULT_TEXT_COLOR }
+        newObj = { id, type: 'text', x, y, width: 200, height: 80, text: '', font_size: TEXT_DEFAULT_FONT_SIZE, font_color: DEFAULT_TEXT_COLOR }
       }
       if (newObj.type !== 'frame') {
         const cx = newObj.x + newObj.width / 2
@@ -721,10 +725,10 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
   )
 
   const handleClearBoard = useCallback(() => {
-    deleteAllObjects(boardId)
+    deleteAllObjects(boardId, user.uid)
       .then(() => setObjects([]))
       .catch((err: unknown) => console.error('Failed to clear board', err))
-  }, [boardId])
+  }, [boardId, user.uid])
 
   const handleBackToBoards = useCallback(() => {
     navigate('/')
@@ -735,8 +739,13 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
   }, [aiChatMessages, aiLoading])
 
   const handleRunAI = useCallback(async () => {
-    const prompt = aiPrompt.trim()
-    if (!prompt) return
+    const prompt = sanitizeAIPrompt(aiPrompt)
+    const result = validateAIPrompt(prompt)
+    if (!result.valid) {
+      setAiPromptValidationError(result.error ?? 'Enter a message')
+      return
+    }
+    setAiPromptValidationError(null)
     setAiPrompt('')
     setAiLoading(true)
     setAiChatMessages((prev) => [...prev, { role: 'user', content: prompt }])
@@ -764,7 +773,7 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
         onSignOut={handleSignOut}
         boardTitle={boardName}
         onBackToBoards={handleBackToBoards}
-        onClearBoard={myRole !== 'viewer' ? handleClearBoard : undefined}
+        onClearBoard={myRole === 'owner' ? handleClearBoard : undefined}
         isShared={hasOtherMembers}
         onShareClick={() => setShowShareModal(true)}
       />
@@ -787,6 +796,7 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
         activeTool={activeTool}
         onToolChange={setActiveTool}
         onCreateClick={handleCreateFromToolbar}
+        showConnectorSourceHint={activeTool === 'connector' && !pendingConnectorFrom}
         connectorStyle={
           selectedObject?.type === 'connector'
             ? (['arrow', 'line', 'dashed', 'dotted'].includes(selectedObject.style ?? '')
@@ -814,6 +824,8 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
           boardId={boardId}
           user={user}
           activeTool={activeTool}
+          pendingConnectorFrom={pendingConnectorFrom}
+          onPendingConnectorFromChange={setPendingConnectorFrom}
           connectorStyle={connectorStyle}
           objects={objects}
           selectedIds={selectedIds}
@@ -842,13 +854,16 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
           onSelectionDragStart={handleSelectionDragStart}
           onSelectionDragMove={handleSelectionDragMove}
           onSelectionDragEnd={handleSelectionDragEnd}
+          onEmptyCanvasClick={() => {
+            if (activeTool === 'select') setActiveTool(null)
+          }}
           isViewOnly={myRole === 'viewer'}
         />
       </div>
 
       {/* AI panel — vertical sidebar */}
       {showAIPanel && (
-        <div className="fixed right-0 bottom-0 w-72 h-[50vh] min-h-[280px] z-30 flex flex-col bg-white border-l border-t border-gray-200 shadow-[-4px_0_16px_rgba(0,0,0,0.08)] rounded-tl-xl">
+        <div className="fixed right-0 bottom-0 w-72 h-[60vh] min-h-[280px] z-30 flex flex-col bg-white border-l border-t border-gray-200 shadow-[-4px_0_16px_rgba(0,0,0,0.08)] rounded-tl-xl">
           {/* Header */}
           <div className="flex items-center justify-between px-3 py-3 border-b border-gray-100">
             <span className="text-sm font-medium text-gray-800">AI Assistant</span>
@@ -899,20 +914,36 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
           </div>
           {/* Vertical input area */}
           <div className="flex flex-col gap-2 p-3 border-t border-gray-100">
-            <label htmlFor="ai-prompt-input" className="sr-only">
-              AI command
-            </label>
-            <textarea
-              id="ai-prompt-input"
-              placeholder="Write your message and press Enter"
-              autoComplete="off"
-              value={aiPrompt}
-              onChange={(e) => setAiPrompt(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleRunAI())}
-              disabled={aiLoading}
-              rows={3}
-              className="w-full resize-none px-3 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-1 focus-visible:border-transparent placeholder:text-gray-400"
-            />
+            <div className="relative">
+              <label htmlFor="ai-prompt-input" className="sr-only">
+                AI command
+              </label>
+              <textarea
+                id="ai-prompt-input"
+                placeholder="Write your message and press Enter"
+                autoComplete="off"
+                value={aiPrompt}
+                onChange={(e) => {
+                  setAiPrompt(e.target.value)
+                  setAiPromptValidationError(null)
+                }}
+                onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleRunAI())}
+                disabled={aiLoading}
+                rows={3}
+                className={`w-full resize-none px-3 py-2.5 text-sm bg-gray-50 border rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-1 placeholder:text-gray-400 ${aiPromptValidationError ? 'border-red-500 focus-visible:border-transparent' : 'border-gray-200 focus-visible:border-transparent'}`}
+                aria-invalid={!!aiPromptValidationError}
+                aria-describedby={aiPromptValidationError ? 'ai-prompt-input-error' : undefined}
+              />
+              {aiPromptValidationError && (
+                <div
+                  id="ai-prompt-input-error"
+                  role="alert"
+                  className="absolute left-0 top-full mt-1 z-50 px-3 py-2 text-sm text-white bg-gray-800 rounded-lg shadow-lg max-w-[280px]"
+                >
+                  {aiPromptValidationError}
+                </div>
+              )}
+            </div>
             <button
               type="button"
               onClick={handleRunAI}

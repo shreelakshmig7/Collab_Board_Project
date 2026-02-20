@@ -10,12 +10,24 @@ import {
   DEFAULT_CONNECTOR_COLOR,
   TEXT_DEFAULT_FONT_SIZE,
   MIN_OBJECT_SIZE,
+  WATERMARK_PLACEHOLDER,
 } from '../constants'
 import { updateObject } from '../supabase/objects.ts'
 
 const DRAG_UPDATE_THROTTLE_MS = 40
 /** Slower throttle for nested frames to reduce lag/flash during drag */
 const NESTED_FRAME_DRAG_THROTTLE_MS = 120
+
+/** When stored text is empty, show watermark (not stored). Returns display text and whether it is placeholder. */
+function getDisplayText(raw: string | undefined): { text: string; isWatermark: boolean } {
+  const t = (raw ?? '').trim()
+  if (t === '') return { text: WATERMARK_PLACEHOLDER, isWatermark: true }
+  return { text: raw ?? '', isWatermark: false }
+}
+
+const WATERMARK_FILL = '#9ca3af'
+/** Explicit fill for real (non-watermark) text so it always renders visible. */
+const DEFAULT_TEXT_FILL = '#1a1a1a'
 
 /** Line-rect intersection: where the ray from (ax,ay) toward (bx,by) exits the rect. */
 function lineRectExit(
@@ -309,11 +321,11 @@ function BoardObjects({
             <Group
               onDblClick={(e) => {
                 e.cancelBubble = true
-                startEditText?.(obj.id, obj.text ?? 'Frame', 'header')
+                startEditText?.(obj.id, obj.text ?? '', 'header')
               }}
               onDblTap={(e) => {
                 e.cancelBubble = true
-                startEditText?.(obj.id, obj.text ?? 'Frame', 'header')
+                startEditText?.(obj.id, obj.text ?? '', 'header')
               }}
             >
               <Rect
@@ -322,15 +334,15 @@ function BoardObjects({
                 fill={color}
                 opacity={0.2}
                 cornerRadius={[4, 4, 0, 0]}
-                listening={false}
+                listening={true}
               />
               <Text
-                text={obj.text ?? 'Frame'}
+                text={obj.text ?? ''}
                 x={12}
                 y={12}
                 width={Math.max(0, obj.width - 24)}
                 wrap="word"
-                fontSize={16}
+                fontSize={20}
                 fontStyle="bold"
                 fill="#3730a3"
                 lineHeight={1.25}
@@ -362,7 +374,7 @@ function BoardObjects({
                   y={8}
                   width={Math.max(0, obj.width - 24)}
                   wrap="word"
-                  fontSize={14}
+                  fontSize={16}
                   fill="#4b5563"
                   lineHeight={1.4}
                   listening={false}
@@ -506,11 +518,11 @@ function BoardObjects({
                     <Group
                       onDblClick={(e) => {
                         e.cancelBubble = true
-                        startEditText?.(child.id, child.text ?? 'Frame', 'header')
+                        startEditText?.(child.id, child.text ?? '', 'header')
                       }}
                       onDblTap={(e) => {
                         e.cancelBubble = true
-                        startEditText?.(child.id, child.text ?? 'Frame', 'header')
+                        startEditText?.(child.id, child.text ?? '', 'header')
                       }}
                     >
                       <Rect
@@ -519,15 +531,15 @@ function BoardObjects({
                         fill={innerColor}
                         opacity={0.2}
                         cornerRadius={[4, 4, 0, 0]}
-                        listening={false}
+                        listening={true}
                       />
                       <Text
-                        text={child.text ?? 'Frame'}
+                        text={child.text ?? ''}
                         x={12}
                         y={12}
                         width={Math.max(0, child.width - 24)}
                         wrap="word"
-                        fontSize={16}
+                        fontSize={20}
                         fontStyle="bold"
                         fill="#3730a3"
                         lineHeight={1.25}
@@ -558,7 +570,7 @@ function BoardObjects({
                           y={8}
                           width={Math.max(0, child.width - 24)}
                           wrap="word"
-                          fontSize={14}
+                          fontSize={16}
                           fill="#4b5563"
                           lineHeight={1.4}
                           listening={false}
@@ -728,12 +740,12 @@ function BoardObjects({
                               listening={false}
                             />
                             <Text
-                              text={grandchild.text ?? 'Frame'}
+                              text={grandchild.text ?? ''}
                               x={12}
                               y={12}
                               width={Math.max(0, grandchild.width - 24)}
                               wrap="word"
-                              fontSize={16}
+                              fontSize={20}
                               fontStyle="bold"
                               fill="#3730a3"
                               listening={false}
@@ -745,7 +757,7 @@ function BoardObjects({
                                 y={48}
                                 width={Math.max(0, grandchild.width - 24)}
                                 wrap="word"
-                                fontSize={14}
+                                fontSize={16}
                                 fill="#4b5563"
                                 listening={false}
                               />
@@ -765,49 +777,59 @@ function BoardObjects({
                                   onObjectClick(gg.id, false)
                                 }}
                               >
-                                {gg.type === 'sticky' && (
-                                  <>
-                                    <Rect
-                                      width={gg.width}
-                                      height={gg.height}
-                                      fill={gg.color ?? DEFAULT_STICKY_COLOR}
-                                      cornerRadius={8}
-                                    />
-                                    <Text
-                                      text={gg.text ?? ''}
-                                      width={gg.width - 16}
-                                      height={gg.height - 16}
-                                      x={8}
-                                      y={8}
-                                      fontSize={textFontSize(gg)}
-                                      listening={false}
-                                      wrap="word"
-                                      align="center"
-                                      verticalAlign="middle"
-                                    />
-                                  </>
-                                )}
-                                {(gg.type === 'rect' || !gg.type) && (
-                                  <>
-                                    <Rect
-                                      width={gg.width}
-                                      height={gg.height}
-                                      fill={gg.color ?? DEFAULT_SHAPE_COLOR}
-                                    />
-                                    <Text
-                                      text={gg.text ?? ''}
-                                      width={gg.width - 16}
-                                      height={gg.height - 16}
-                                      x={8}
-                                      y={8}
-                                      fontSize={textFontSize(gg)}
-                                      listening={false}
-                                      wrap="word"
-                                      align="center"
-                                      verticalAlign="middle"
-                                    />
-                                  </>
-                                )}
+                                {gg.type === 'sticky' && (() => {
+                                  const { text: ggText, isWatermark: ggWm } = getDisplayText(gg.text)
+                                  return (
+                                    <>
+                                      <Rect
+                                        width={gg.width}
+                                        height={gg.height}
+                                        fill={gg.color ?? DEFAULT_STICKY_COLOR}
+                                        cornerRadius={8}
+                                      />
+                                      <Text
+                                        text={ggText}
+                                        width={gg.width - 16}
+                                        height={gg.height - 16}
+                                        x={8}
+                                        y={8}
+                                        fontSize={textFontSize(gg)}
+                                        fill={ggWm ? WATERMARK_FILL : DEFAULT_TEXT_FILL}
+                                        fontStyle={ggWm ? 'italic' : 'normal'}
+                                        listening={false}
+                                        wrap="word"
+                                        align="center"
+                                        verticalAlign="middle"
+                                      />
+                                    </>
+                                  )
+                                })()}
+                                {(gg.type === 'rect' || !gg.type) && (() => {
+                                  const { text: ggText, isWatermark: ggWm } = getDisplayText(gg.text)
+                                  return (
+                                    <>
+                                      <Rect
+                                        width={gg.width}
+                                        height={gg.height}
+                                        fill={gg.color ?? DEFAULT_SHAPE_COLOR}
+                                      />
+                                      <Text
+                                        text={ggText}
+                                        width={gg.width - 16}
+                                        height={gg.height - 16}
+                                        x={8}
+                                        y={8}
+                                        fontSize={textFontSize(gg)}
+                                        fill={ggWm ? WATERMARK_FILL : DEFAULT_TEXT_FILL}
+                                        fontStyle={ggWm ? 'italic' : 'normal'}
+                                        listening={false}
+                                        wrap="word"
+                                        align="center"
+                                        verticalAlign="middle"
+                                      />
+                                    </>
+                                  )
+                                })()}
                               </Group>
                             ))}
                           </Group>
@@ -847,18 +869,25 @@ function BoardObjects({
                               fill={c}
                               cornerRadius={8}
                             />
-                            <Text
-                              text={grandchild.text ?? ''}
-                              width={grandchild.width - 16}
-                              height={grandchild.height - 16}
-                              x={8}
-                              y={8}
-                              fontSize={textFontSize(grandchild)}
-                              listening={false}
-                              wrap="word"
-                              align="center"
-                              verticalAlign="middle"
-                            />
+                            {(() => {
+                              const { text: gcText, isWatermark: gcWm } = getDisplayText(grandchild.text)
+                              return (
+                                <Text
+                                  text={gcText}
+                                  width={grandchild.width - 16}
+                                  height={grandchild.height - 16}
+                                  x={8}
+                                  y={8}
+                                  fontSize={textFontSize(grandchild)}
+                                  fill={gcWm ? WATERMARK_FILL : DEFAULT_TEXT_FILL}
+                                  fontStyle={gcWm ? 'italic' : 'normal'}
+                                  listening={false}
+                                  wrap="word"
+                                  align="center"
+                                  verticalAlign="middle"
+                                />
+                              )
+                            })()}
                           </Group>
                         )
                       }
@@ -894,18 +923,25 @@ function BoardObjects({
                             height={grandchild.height}
                             fill={c}
                           />
-                          <Text
-                            text={grandchild.text ?? ''}
-                            width={grandchild.width - 16}
-                            height={grandchild.height - 16}
-                            x={8}
-                            y={8}
-                            fontSize={textFontSize(grandchild)}
-                            listening={false}
-                            wrap="word"
-                            align="center"
-                            verticalAlign="middle"
-                          />
+                          {(() => {
+                            const { text: gcText, isWatermark: gcWm } = getDisplayText(grandchild.text)
+                            return (
+                              <Text
+                                text={gcText}
+                                width={grandchild.width - 16}
+                                height={grandchild.height - 16}
+                                x={8}
+                                y={8}
+                                fontSize={textFontSize(grandchild)}
+                                fill={gcWm ? WATERMARK_FILL : DEFAULT_TEXT_FILL}
+                                fontStyle={gcWm ? 'italic' : 'normal'}
+                                listening={false}
+                                wrap="word"
+                                align="center"
+                                verticalAlign="middle"
+                              />
+                            )
+                          })()}
                         </Group>
                       )
                     })}
@@ -957,18 +993,25 @@ function BoardObjects({
                       stroke={childSelectionStroke ?? 'transparent'}
                       strokeWidth={childSelectionStroke ? 3 : 0}
                     />
-                    <Text
-                      text={child.text ?? ''}
-                      width={child.width - 16}
-                      height={child.height - 16}
-                      x={8}
-                      y={8}
-                      fontSize={textFontSize(child)}
-                      listening={false}
-                      wrap="word"
-                      align="center"
-                      verticalAlign="middle"
-                    />
+                    {(() => {
+                      const { text: chText, isWatermark: chWm } = getDisplayText(child.text)
+                      return (
+                        <Text
+                          text={chText}
+                          width={child.width - 16}
+                          height={child.height - 16}
+                          x={8}
+                          y={8}
+                          fontSize={textFontSize(child)}
+                          fill={chWm ? WATERMARK_FILL : DEFAULT_TEXT_FILL}
+                          fontStyle={chWm ? 'italic' : 'normal'}
+                          listening={false}
+                          wrap="word"
+                          align="center"
+                          verticalAlign="middle"
+                        />
+                      )
+                    })()}
                   </Group>
                 )
               }
@@ -1025,18 +1068,25 @@ function BoardObjects({
                       stroke={childSelectionStroke ?? '#333'}
                       strokeWidth={childSelectionStroke ? 3 : 2}
                     />
-                    <Text
-                      text={child.text ?? ''}
-                      width={d - 12}
-                      height={d - 12}
-                      x={6}
-                      y={6}
-                      fontSize={textFontSize({ ...child, width: d, height: d })}
-                      listening={false}
-                      wrap="word"
-                      align="center"
-                      verticalAlign="middle"
-                    />
+                    {(() => {
+                      const { text: chText, isWatermark: chWm } = getDisplayText(child.text)
+                      return (
+                        <Text
+                          text={chText}
+                          width={d - 12}
+                          height={d - 12}
+                          x={6}
+                          y={6}
+                          fontSize={textFontSize({ ...child, width: d, height: d })}
+                          fill={chWm ? WATERMARK_FILL : DEFAULT_TEXT_FILL}
+                          fontStyle={chWm ? 'italic' : 'normal'}
+                          listening={false}
+                          wrap="word"
+                          align="center"
+                          verticalAlign="middle"
+                        />
+                      )
+                    })()}
                   </Group>
                 )
               }
@@ -1132,16 +1182,22 @@ function BoardObjects({
                         listening={false}
                       />
                     )}
-                    <Text
-                      text={child.text ?? ''}
-                      width={child.width}
-                      height={child.height}
-                      fontSize={fs}
-                      fill={fc}
-                      wrap="word"
-                      align="left"
-                      verticalAlign="top"
-                    />
+                    {(() => {
+                      const { text: chText, isWatermark: chWm } = getDisplayText(child.text)
+                      return (
+                        <Text
+                          text={chText}
+                          width={child.width}
+                          height={child.height}
+                          fontSize={fs}
+                          fill={chWm ? WATERMARK_FILL : fc}
+                          fontStyle={chWm ? 'italic' : 'normal'}
+                          wrap="word"
+                          align="left"
+                          verticalAlign="top"
+                        />
+                      )
+                    })()}
                   </Group>
                 )
               }
@@ -1189,18 +1245,25 @@ function BoardObjects({
                     stroke={childSelectionStroke ?? '#333'}
                     strokeWidth={childSelectionStroke ? 3 : 2}
                   />
-                  <Text
-                    text={child.text ?? ''}
-                    width={child.width - 16}
-                    height={child.height - 16}
-                    x={8}
-                    y={8}
-                    fontSize={textFontSize(child)}
-                    listening={false}
-                    wrap="word"
-                    align="center"
-                    verticalAlign="middle"
-                  />
+                  {(() => {
+                    const { text: chText, isWatermark: chWm } = getDisplayText(child.text)
+                    return (
+                      <Text
+                        text={chText}
+                        width={child.width - 16}
+                        height={child.height - 16}
+                        x={8}
+                        y={8}
+                        fontSize={textFontSize(child)}
+                        fill={chWm ? WATERMARK_FILL : DEFAULT_TEXT_FILL}
+                        fontStyle={chWm ? 'italic' : 'normal'}
+                        listening={false}
+                        wrap="word"
+                        align="center"
+                        verticalAlign="middle"
+                      />
+                    )
+                  })()}
                 </Group>
               )
             })}
@@ -1250,18 +1313,25 @@ function BoardObjects({
                 stroke={selectionStroke ?? 'transparent'}
                 strokeWidth={selectionStroke ? 3 : 0}
               />
-              <Text
-                text={obj.text ?? ''}
-                width={obj.width - 16}
-                height={obj.height - 16}
-                x={8}
-                y={8}
-                fontSize={textFontSize(obj)}
-                listening={false}
-                wrap="word"
-                align="center"
-                verticalAlign="middle"
-              />
+              {(() => {
+                const { text: dispText, isWatermark } = getDisplayText(obj.text)
+                return (
+                  <Text
+                    text={dispText}
+                    width={obj.width - 16}
+                    height={obj.height - 16}
+                    x={8}
+                    y={8}
+                    fontSize={textFontSize(obj)}
+                    fill={isWatermark ? WATERMARK_FILL : DEFAULT_TEXT_FILL}
+                    fontStyle={isWatermark ? 'italic' : 'normal'}
+                    listening={false}
+                    wrap="word"
+                    align="center"
+                    verticalAlign="middle"
+                  />
+                )
+              })()}
             </Group>
           )
         }
@@ -1311,18 +1381,25 @@ function BoardObjects({
                 stroke={selectionStroke ?? '#333'}
                 strokeWidth={selectionStroke ? 3 : 2}
               />
-              <Text
-                text={obj.text ?? ''}
-                width={diameter - 12}
-                height={diameter - 12}
-                x={6}
-                y={6}
-                fontSize={textFontSize({ ...obj, width: diameter, height: diameter })}
-                listening={false}
-                wrap="word"
-                align="center"
-                verticalAlign="middle"
-              />
+              {(() => {
+                const { text: dispText, isWatermark } = getDisplayText(obj.text)
+                return (
+                  <Text
+                    text={dispText}
+                    width={diameter - 12}
+                    height={diameter - 12}
+                    x={6}
+                    y={6}
+                    fontSize={textFontSize({ ...obj, width: diameter, height: diameter })}
+                    fill={isWatermark ? WATERMARK_FILL : DEFAULT_TEXT_FILL}
+                    fontStyle={isWatermark ? 'italic' : 'normal'}
+                    listening={false}
+                    wrap="word"
+                    align="center"
+                    verticalAlign="middle"
+                  />
+                )
+              })()}
             </Group>
           )
         }
@@ -1402,16 +1479,22 @@ function BoardObjects({
                   listening={false}
                 />
               )}
-              <Text
-                text={obj.text ?? ''}
-                width={obj.width}
-                height={obj.height}
-                fontSize={fontSize}
-                fill={fontColor}
-                wrap="word"
-                align="left"
-                verticalAlign="top"
-              />
+              {(() => {
+                const { text: dispText, isWatermark } = getDisplayText(obj.text)
+                return (
+                  <Text
+                    text={dispText}
+                    width={obj.width}
+                    height={obj.height}
+                    fontSize={fontSize}
+                    fill={isWatermark ? WATERMARK_FILL : fontColor}
+                    fontStyle={isWatermark ? 'italic' : 'normal'}
+                    wrap="word"
+                    align="left"
+                    verticalAlign="top"
+                  />
+                )
+              })()}
             </Group>
           )
         }
@@ -1451,18 +1534,25 @@ function BoardObjects({
               stroke={selectionStroke ?? '#333'}
               strokeWidth={selectionStroke ? 3 : 2}
             />
-            <Text
-              text={obj.text ?? ''}
-              width={obj.width - 16}
-              height={obj.height - 16}
-              x={8}
-              y={8}
-              fontSize={textFontSize(obj)}
-              listening={false}
-              wrap="word"
-              align="center"
-              verticalAlign="middle"
-            />
+            {(() => {
+              const { text: dispText, isWatermark } = getDisplayText(obj.text)
+              return (
+                <Text
+                  text={dispText}
+                  width={obj.width - 16}
+                  height={obj.height - 16}
+                  x={8}
+                  y={8}
+                  fontSize={textFontSize(obj)}
+                  fill={isWatermark ? WATERMARK_FILL : DEFAULT_TEXT_FILL}
+                  fontStyle={isWatermark ? 'italic' : 'normal'}
+                  listening={false}
+                  wrap="word"
+                  align="center"
+                  verticalAlign="middle"
+                />
+              )
+            })()}
           </Group>
         )
       })}

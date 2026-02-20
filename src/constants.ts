@@ -33,3 +33,6 @@ export const TEXT_DEFAULT_FONT_SIZE = 18
 
 /** Minimum width/height for resizable objects to prevent invisible/crashed renders. */
 export const MIN_OBJECT_SIZE = 8
+
+/** Placeholder shown when object text is empty (watermark style). Not stored as real content. */
+export const WATERMARK_PLACEHOLDER = 'double click to edit'

@@ -15,6 +15,8 @@ type ToolbarProps = {
   activeTool: Tool | null
   onToolChange: (tool: Tool | null) => void
   onCreateClick?: (tool: CreateTool) => void
+  /** When true, show "Select source node" tooltip next to Connector button */
+  showConnectorSourceHint?: boolean
   connectorStyle: ConnectorStyle
   onConnectorStyleChange: (style: ConnectorStyle) => void
   selectedIds: string[]
@@ -50,6 +52,7 @@ export default function Toolbar({
   activeTool,
   onToolChange,
   onCreateClick,
+  showConnectorSourceHint = false,
   connectorStyle,
   onConnectorStyleChange,
   selectedIds,
@@ -135,9 +138,20 @@ export default function Toolbar({
         <button type="button" onClick={() => handleToolClick('text')} className={toolBtn(activeTool === 'text')}>
           Text
         </button>
-        <button type="button" onClick={() => handleToolClick('connector')} className={toolBtn(activeTool === 'connector')}>
-          Connector
-        </button>
+        <span className="relative inline-block">
+          <button type="button" onClick={() => handleToolClick('connector')} className={toolBtn(activeTool === 'connector')}>
+            Connector
+          </button>
+          {showConnectorSourceHint && (
+            <span
+              className="absolute left-0 top-full mt-1 px-2 py-1 text-xs font-medium text-slate-700 bg-white border border-gray-200 rounded-md shadow-sm whitespace-nowrap z-50"
+              role="status"
+              aria-live="polite"
+            >
+              Select source node
+            </span>
+          )}
+        </span>
       </div>
       {/* Connector style picker: Arrow | Line | Dashed (when Connector tool active or a connector is selected) */}
       {(activeTool === 'connector' || selectedObject?.type === 'connector') && (

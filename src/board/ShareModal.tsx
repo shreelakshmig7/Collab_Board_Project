@@ -10,6 +10,7 @@ import {
   type BoardMemberWithProfile,
   type BoardInvite,
 } from '../supabase/boardMembers'
+import { validateInviteEmail, sanitizeInviteEmail } from '../utils/inputValidation'
 type ShareModalProps = {
   isOpen: boolean
   onClose: () => void
@@ -40,6 +41,7 @@ export default function ShareModal({
   const [inviteRole, setInviteRole] = useState<'editor' | 'viewer'>('editor')
   const [inviting, setInviting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [inviteValidationError, setInviteValidationError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
 
   const fetchLists = useCallback(async () => {
@@ -60,15 +62,20 @@ export default function ShareModal({
   }, [isOpen, boardId, fetchLists])
 
   const handleInvite = useCallback(async () => {
-    const email = inviteEmail.trim()
-    if (!email) return
+    const email = sanitizeInviteEmail(inviteEmail)
+    const result = validateInviteEmail(email)
+    if (!result.valid) {
+      setInviteValidationError(result.error ?? 'Invalid email')
+      return
+    }
+    setInviteValidationError(null)
     setError(null)
     setMessage(null)
     setInviting(true)
     try {
-      const result = await inviteByEmail(boardId, email, inviteRole, currentUserId)
+      const inviteResult = await inviteByEmail(boardId, email, inviteRole, currentUserId)
       setInviteEmail('')
-      setMessage(result.message)
+      setMessage(inviteResult.message)
       await fetchLists()
       onBoardUpdated?.()
     } catch (err) {
@@ -176,21 +183,37 @@ export default function ShareModal({
               <label htmlFor="share-invite-email" className="text-sm font-medium text-gray-700">
                 Add by email
               </label>
-              <div className="flex gap-2 flex-wrap">
-                <input
-                  id="share-invite-email"
-                  type="email"
-                  placeholder="email@example.com"
-                  value={inviteEmail}
-                  onChange={(e) => setInviteEmail(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleInvite()}
-                  className="flex-1 min-w-[140px] px-3 py-2 text-sm border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                  aria-label="Email to invite"
-                />
+              <div className="flex gap-2 flex-wrap items-start">
+                <div className="flex-1 min-w-[140px] relative">
+                  <input
+                    id="share-invite-email"
+                    type="email"
+                    placeholder="email@example.com"
+                    value={inviteEmail}
+                    onChange={(e) => {
+                      setInviteEmail(e.target.value)
+                      setInviteValidationError(null)
+                    }}
+                    onKeyDown={(e) => e.key === 'Enter' && handleInvite()}
+                    className={`w-full px-3 py-2 text-sm border rounded-xl focus:ring-2 focus:ring-blue-500 outline-none ${inviteValidationError ? 'border-red-500' : 'border-gray-300'}`}
+                    aria-label="Email to invite"
+                    aria-invalid={!!inviteValidationError}
+                    aria-describedby={inviteValidationError ? 'share-invite-email-error' : undefined}
+                  />
+                  {inviteValidationError && (
+                    <div
+                      id="share-invite-email-error"
+                      role="alert"
+                      className="absolute left-0 top-full mt-1 z-50 px-3 py-2 text-sm text-white bg-gray-800 rounded-lg shadow-lg max-w-[280px]"
+                    >
+                      {inviteValidationError}
+                    </div>
+                  )}
+                </div>
                 <select
                   value={inviteRole}
                   onChange={(e) => setInviteRole(e.target.value as 'editor' | 'viewer')}
-                  className="px-3 py-2 text-sm border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none"
+                  className="px-3 py-2 text-sm border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none shrink-0"
                   aria-label="Role for invite"
                 >
                   {ROLE_OPTIONS.map((o) => (

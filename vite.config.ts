@@ -8,5 +8,6 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
+    reporters: ['default', ['json', { outputFile: 'test/test-results.json' }]],
   },
 })

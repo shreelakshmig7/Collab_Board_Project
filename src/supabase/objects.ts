@@ -1,4 +1,5 @@
 import { supabase } from './config'
+import { getBoard } from './boards'
 import type { BoardObject } from '../types/board'
 import { MIN_OBJECT_SIZE } from '../constants'
 
@@ -200,8 +201,12 @@ export async function deleteObject(boardId: string, id: string): Promise<void> {
   if (error) throw error
 }
 
-/** Delete all objects on a board (clear board). */
-export async function deleteAllObjects(boardId: string): Promise<void> {
+/** Delete all objects on a board (clear board). Only the board owner may clear. */
+export async function deleteAllObjects(boardId: string, callerUserId: string): Promise<void> {
+  const board = await getBoard(boardId)
+  if (!board) throw new Error('Board not found')
+  if (board.user_id !== callerUserId)
+    throw new Error('Only the board owner can clear the board')
   const { error } = await requireSupabase()
     .from(TABLE)
     .delete()
