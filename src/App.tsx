@@ -6,6 +6,7 @@ import LoginPage from './auth/LoginPage'
 import BoardsListPage from './board/BoardsListPage'
 import BoardPage from './board/BoardPage'
 import { getBoard } from './supabase/boards'
+import { upsertProfile } from './supabase/profiles'
 import { upsertPresence, removePresence, subscribePresence } from './supabase/presence'
 import { HEARTBEAT_MS } from './constants'
 
@@ -63,6 +64,11 @@ export default function App() {
     const unsub = onAuthStateChanged((u) => {
       setUser(u)
       setLoading(false)
+      if (u) {
+        upsertProfile(u.uid, { email: u.email ?? null, display_name: u.displayName ?? null }).catch((err: unknown) =>
+          console.error('upsertProfile failed', err)
+        )
+      }
     })
     return unsub
   }, [])

@@ -10,6 +10,10 @@ import { removeAllCursorsForUser } from '../supabase/cursors'
 import { subscribeDragMoves, sendDragMove } from '../supabase/dragBroadcast'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 import { signOut } from '../supabase/auth'
+import { getBoard } from '../supabase/boards'
+import type { Board } from '../supabase/boards'
+import { getMyRole, listBoardMembers } from '../supabase/boardMembers'
+import ShareModal from './ShareModal'
 import type { BoardObject, ConnectorStyle } from '../types/board'
 import { runAICommand } from '../ai/claudeAgent'
 import {
@@ -52,6 +56,10 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
   >([])
   const [aiLoading, setAiLoading] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
+  const [board, setBoard] = useState<Board | null>(null)
+  const [myRole, setMyRole] = useState<'owner' | 'editor' | 'viewer' | null>(null)
+  const [showShareModal, setShowShareModal] = useState(false)
+  const [hasOtherMembers, setHasOtherMembers] = useState(false)
 
   // Clipboard for copy/paste
   const clipboardRef = useRef<BoardObject[]>([])
@@ -60,6 +68,52 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
   // Viewport center (from Canvas) for creating objects when toolbar button is clicked
   const viewportCenterRef = useRef({ x: 250, y: 200 })
   const aiChatScrollRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    getBoard(boardId)
+      .then((b) => {
+        if (!cancelled) setBoard(b ?? null)
+      })
+      .catch((err: unknown) => {
+        console.error('getBoard failed', err)
+        if (!cancelled) setBoard(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [boardId])
+
+  useEffect(() => {
+    let cancelled = false
+    getMyRole(boardId, user.uid)
+      .then((role) => {
+        if (!cancelled) {
+          setMyRole(role)
+          if (role === 'viewer') setActiveTool(null)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setMyRole(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [boardId, user.uid])
+
+  useEffect(() => {
+    let cancelled = false
+    listBoardMembers(boardId)
+      .then((members) => {
+        if (!cancelled) setHasOtherMembers(members.length > 1)
+      })
+      .catch(() => {
+        if (!cancelled) setHasOtherMembers(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [boardId])
 
   const handleOptimisticAdd = useCallback((obj: BoardObject) => {
     setObjects((prev) => [...prev, obj])
@@ -708,8 +762,25 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
         onSignOut={handleSignOut}
         boardTitle={boardName}
         onBackToBoards={handleBackToBoards}
-        onClearBoard={handleClearBoard}
+        onClearBoard={myRole !== 'viewer' ? handleClearBoard : undefined}
+        isShared={hasOtherMembers}
+        onShareClick={() => setShowShareModal(true)}
       />
+      {showShareModal && (
+        <ShareModal
+          isOpen={showShareModal}
+          onClose={() => setShowShareModal(false)}
+          board={board}
+          boardId={boardId}
+          currentUserId={user.uid}
+          isOwner={myRole === 'owner'}
+          onBoardUpdated={() => {
+            getBoard(boardId).then((b) => setBoard(b ?? null))
+            getMyRole(boardId, user.uid).then((role) => setMyRole(role))
+            listBoardMembers(boardId).then((members) => setHasOtherMembers(members.length > 1))
+          }}
+        />
+      )}
       <Toolbar
         activeTool={activeTool}
         onToolChange={setActiveTool}
@@ -729,6 +800,7 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
         onResize={handleResize}
         onDuplicate={handleDuplicate}
         onDelete={handleDeleteSelected}
+        isViewOnly={myRole === 'viewer'}
       />
       {createError && (
         <div className="px-3 py-2 bg-red-50 text-red-700 text-sm" role="alert">
@@ -768,6 +840,7 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
           onSelectionDragStart={handleSelectionDragStart}
           onSelectionDragMove={handleSelectionDragMove}
           onSelectionDragEnd={handleSelectionDragEnd}
+          isViewOnly={myRole === 'viewer'}
         />
       </div>
 

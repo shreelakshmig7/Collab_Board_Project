@@ -7,9 +7,13 @@ type TopBarProps = {
   boardTitle?: string
   onBackToBoards?: () => void
   onClearBoard?: () => void
+  /** When true, show Shared pill; when false and boardTitle present, show Private pill */
+  isShared?: boolean
+  /** Opens the Share modal. Only shown when boardTitle is present. */
+  onShareClick?: () => void
 }
 
-export default function TopBar({ presenceNames, onSignOut, boardTitle, onBackToBoards, onClearBoard }: TopBarProps) {
+export default function TopBar({ presenceNames, onSignOut, boardTitle, onBackToBoards, onClearBoard, isShared = false, onShareClick }: TopBarProps) {
   const [showPresenceDropdown, setShowPresenceDropdown] = useState(false)
   const [showClearModal, setShowClearModal] = useState(false)
   const presenceRef = useRef<HTMLDivElement>(null)
@@ -46,8 +50,38 @@ export default function TopBar({ presenceNames, onSignOut, boardTitle, onBackToB
           <span className="font-semibold text-xl text-gray-800 tracking-tight">
             {boardTitle ?? 'CollabBoard'}
           </span>
+          {boardTitle != null && (
+            <span
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium"
+              aria-label={isShared ? 'Board is shared' : 'Board is private'}
+              style={{
+                backgroundColor: isShared ? 'rgb(187 247 208)' : 'rgb(243 244 246)',
+                color: isShared ? 'rgb(22 101 52)' : 'rgb(75 85 99)',
+              }}
+            >
+              {isShared ? (
+                <>
+                  <span aria-hidden>🌐</span> Shared
+                </>
+              ) : (
+                <>
+                  <span aria-hidden>🔒</span> Private
+                </>
+              )}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-5">
+          {boardTitle != null && onShareClick && (
+            <button
+              type="button"
+              onClick={onShareClick}
+              className="px-4 py-2 text-sm font-medium rounded-xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 transition-colors focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus:outline-none"
+              aria-label="Share board"
+            >
+              Share
+            </button>
+          )}
           {onClearBoard && (
             <button
               type="button"

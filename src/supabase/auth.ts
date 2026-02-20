@@ -1,8 +1,8 @@
 import { supabase } from './config'
 import type { AppUser } from '../types/user'
 
-function toAppUser(uid: string, displayName: string | null): AppUser {
-  return { uid, displayName }
+function toAppUser(uid: string, displayName: string | null, email: string | null): AppUser {
+  return { uid, displayName, email: email ?? undefined }
 }
 
 export function signInWithGoogle() {
@@ -53,7 +53,7 @@ export function onAuthStateChanged(callback: (user: AppUser | null) => void): ()
       return
     }
     const name = user.user_metadata?.full_name ?? user.user_metadata?.name ?? user.email ?? null
-    callback(toAppUser(user.id, name))
+    callback(toAppUser(user.id, name, user.email ?? null))
   }
   getSessionAndNotify()
   const { data: { subscription } } = client.auth.onAuthStateChange((_event, session) => {
@@ -63,7 +63,7 @@ export function onAuthStateChanged(callback: (user: AppUser | null) => void): ()
     }
     const u = session.user
     const name = u.user_metadata?.full_name ?? u.user_metadata?.name ?? u.email ?? null
-    callback(toAppUser(u.id, name))
+    callback(toAppUser(u.id, name, u.email ?? null))
   })
   return () => subscription.unsubscribe()
 }

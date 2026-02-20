@@ -24,6 +24,7 @@ type ToolbarProps = {
   onResize: (width: number, height: number) => void
   onDuplicate: () => void
   onDelete: () => void
+  isViewOnly?: boolean
 }
 
 function clampSize(val: number): number {
@@ -58,6 +59,7 @@ export default function Toolbar({
   onResize,
   onDuplicate,
   onDelete,
+  isViewOnly = false,
 }: ToolbarProps) {
   const [localWidth, setLocalWidth] = useState('')
   const [localHeight, setLocalHeight] = useState('')
@@ -74,6 +76,14 @@ export default function Toolbar({
       setLocalHeight(String(Math.round(selectedObject.height)))
     }
   }, [selectedObject?.id, selectedObject?.width, selectedObject?.height, focusedInput])
+
+  if (isViewOnly) {
+    return (
+      <div className="flex items-center gap-3 px-4 py-2 border-b border-gray-200 bg-gray-50">
+        <span className="text-sm font-medium text-gray-500">View only</span>
+      </div>
+    )
+  }
 
   const commitWidth = () => {
     if (!selectedObject) return

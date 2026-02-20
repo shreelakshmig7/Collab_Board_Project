@@ -1,5 +1,5 @@
 import { supabase } from './config'
-import { PRESENCE_TIMEOUT_MS } from '../constants'
+import { PRESENCE_TIMEOUT_MS, CURSOR_POLL_MS } from '../constants'
 
 const TABLE = 'cursors'
 
@@ -116,7 +116,9 @@ export function subscribeCursors(
         console.warn('[Realtime] cursors subscription status:', status, err ?? '')
       }
     })
+  const pollId = setInterval(fetchAndNotify, CURSOR_POLL_MS)
   return () => {
+    clearInterval(pollId)
     db.removeChannel(channel)
   }
 }

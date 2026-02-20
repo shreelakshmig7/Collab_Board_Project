@@ -115,6 +115,8 @@ type BoardObjectsProps = {
   pendingConnectorFrom?: string | null
   /** Connector dragged to new position (updates from/to endpoints) */
   onConnectorMoved?: (id: string, fromX: number, fromY: number, toX: number, toY: number) => void
+  /** View-only mode: no drag, no resize, no edit */
+  readOnly?: boolean
 }
 
 function BoardObjects({
@@ -131,9 +133,13 @@ function BoardObjects({
   onMultiDragMove,
   pendingConnectorFrom,
   onConnectorMoved,
+  readOnly = false,
 }: BoardObjectsProps) {
   const lastDragUpdateRef = useRef<Record<string, number>>({})
   const lastNestedDragRef = useRef<Record<string, number>>({})
+  const draggable = !readOnly
+  /** No text edit in view-only mode */
+  const startEditText = readOnly ? undefined : onStartEditText
 
   const throttleDragUpdate = (objId: string, x: number, y: number, isNestedFrame = false) => {
     const now = Date.now()
@@ -266,7 +272,7 @@ function BoardObjects({
             x={obj.x}
             y={obj.y}
             rotation={obj.rotation ?? 0}
-            draggable
+            draggable={draggable}
             onClick={(e) => {
               e.cancelBubble = true
               onObjectClick(obj.id, e.evt.shiftKey)
@@ -303,11 +309,11 @@ function BoardObjects({
             <Group
               onDblClick={(e) => {
                 e.cancelBubble = true
-                onStartEditText?.(obj.id, obj.text ?? 'Frame', 'header')
+                startEditText?.(obj.id, obj.text ?? 'Frame', 'header')
               }}
               onDblTap={(e) => {
                 e.cancelBubble = true
-                onStartEditText?.(obj.id, obj.text ?? 'Frame', 'header')
+                startEditText?.(obj.id, obj.text ?? 'Frame', 'header')
               }}
             >
               <Rect
@@ -336,11 +342,11 @@ function BoardObjects({
               y={40}
               onDblClick={(e) => {
                 e.cancelBubble = true
-                onStartEditText?.(obj.id, obj.body_text ?? '', 'body')
+                startEditText?.(obj.id, obj.body_text ?? '', 'body')
               }}
               onDblTap={(e) => {
                 e.cancelBubble = true
-                onStartEditText?.(obj.id, obj.body_text ?? '', 'body')
+                startEditText?.(obj.id, obj.body_text ?? '', 'body')
               }}
             >
               <Rect
@@ -468,7 +474,7 @@ function BoardObjects({
                     x={relX}
                     y={relY}
                     rotation={child.rotation ?? 0}
-                    draggable
+                    draggable={draggable}
                     onClick={(e) => {
                       e.cancelBubble = true
                       onObjectClick(child.id, e.evt.shiftKey)
@@ -500,11 +506,11 @@ function BoardObjects({
                     <Group
                       onDblClick={(e) => {
                         e.cancelBubble = true
-                        onStartEditText?.(child.id, child.text ?? 'Frame', 'header')
+                        startEditText?.(child.id, child.text ?? 'Frame', 'header')
                       }}
                       onDblTap={(e) => {
                         e.cancelBubble = true
-                        onStartEditText?.(child.id, child.text ?? 'Frame', 'header')
+                        startEditText?.(child.id, child.text ?? 'Frame', 'header')
                       }}
                     >
                       <Rect
@@ -532,11 +538,11 @@ function BoardObjects({
                       y={40}
                       onDblClick={(e) => {
                         e.cancelBubble = true
-                        onStartEditText?.(child.id, child.body_text ?? '', 'body')
+                        startEditText?.(child.id, child.body_text ?? '', 'body')
                       }}
                       onDblTap={(e) => {
                         e.cancelBubble = true
-                        onStartEditText?.(child.id, child.body_text ?? '', 'body')
+                        startEditText?.(child.id, child.body_text ?? '', 'body')
                       }}
                     >
                       <Rect
@@ -684,7 +690,7 @@ function BoardObjects({
                             id={grandchild.id}
                             x={gRelX}
                             y={gRelY}
-                            draggable
+                            draggable={draggable}
                             onClick={(e) => {
                               e.cancelBubble = true
                               onObjectClick(grandchild.id, e.evt.shiftKey)
@@ -815,7 +821,7 @@ function BoardObjects({
                             id={grandchild.id}
                             x={gRelX}
                             y={gRelY}
-                            draggable
+                            draggable={draggable}
                             onClick={(e) => {
                               e.cancelBubble = true
                               onObjectClick(grandchild.id, e.evt.shiftKey)
@@ -863,7 +869,7 @@ function BoardObjects({
                           id={grandchild.id}
                           x={gRelX}
                           y={gRelY}
-                          draggable
+                          draggable={draggable}
                           onClick={(e) => {
                             e.cancelBubble = true
                             onObjectClick(grandchild.id, e.evt.shiftKey)
@@ -915,7 +921,7 @@ function BoardObjects({
                     x={relX}
                     y={relY}
                     rotation={child.rotation ?? 0}
-                    draggable
+                    draggable={draggable}
                     onClick={(e) => {
                       e.cancelBubble = true
                       onObjectClick(child.id, e.evt.shiftKey)
@@ -936,11 +942,11 @@ function BoardObjects({
                     onDragEnd={onChildDragEnd}
                     onDblClick={(e) => {
                       e.cancelBubble = true
-                      onStartEditText?.(child.id, child.text ?? '')
+                      startEditText?.(child.id, child.text ?? '')
                     }}
                     onDblTap={(e) => {
                       e.cancelBubble = true
-                      onStartEditText?.(child.id, child.text ?? '')
+                      startEditText?.(child.id, child.text ?? '')
                     }}
                   >
                     <Rect
@@ -982,7 +988,7 @@ function BoardObjects({
                     x={relX}
                     y={relY}
                     rotation={child.rotation ?? 0}
-                    draggable
+                    draggable={draggable}
                     clipFunc={clipPath}
                     onClick={(e) => {
                       e.cancelBubble = true
@@ -1004,11 +1010,11 @@ function BoardObjects({
                     onDragEnd={onChildDragEnd}
                     onDblClick={(e) => {
                       e.cancelBubble = true
-                      onStartEditText?.(child.id, child.text ?? '')
+                      startEditText?.(child.id, child.text ?? '')
                     }}
                     onDblTap={(e) => {
                       e.cancelBubble = true
-                      onStartEditText?.(child.id, child.text ?? '')
+                      startEditText?.(child.id, child.text ?? '')
                     }}
                   >
                     <Circle
@@ -1043,7 +1049,7 @@ function BoardObjects({
                     x={relX}
                     y={relY}
                     rotation={child.rotation ?? 0}
-                    draggable
+                    draggable={draggable}
                     onClick={(e) => {
                       e.cancelBubble = true
                       onObjectClick(child.id, e.evt.shiftKey)
@@ -1084,7 +1090,7 @@ function BoardObjects({
                     x={relX}
                     y={relY}
                     rotation={child.rotation ?? 0}
-                    draggable
+                    draggable={draggable}
                     onClick={(e) => {
                       e.cancelBubble = true
                       onObjectClick(child.id, e.evt.shiftKey)
@@ -1105,11 +1111,11 @@ function BoardObjects({
                     onDragEnd={onChildDragEnd}
                     onDblClick={(e) => {
                       e.cancelBubble = true
-                      onStartEditText?.(child.id, child.text ?? '')
+                      startEditText?.(child.id, child.text ?? '')
                     }}
                     onDblTap={(e) => {
                       e.cancelBubble = true
-                      onStartEditText?.(child.id, child.text ?? '')
+                      startEditText?.(child.id, child.text ?? '')
                     }}
                   >
                     {isChildSelected && (
@@ -1148,7 +1154,7 @@ function BoardObjects({
                   x={relX}
                   y={relY}
                   rotation={child.rotation ?? 0}
-                  draggable
+                  draggable={draggable}
                   onClick={(e) => {
                     e.cancelBubble = true
                     onObjectClick(child.id, e.evt.shiftKey)
@@ -1169,11 +1175,11 @@ function BoardObjects({
                   onDragEnd={onChildDragEnd}
                   onDblClick={(e) => {
                     e.cancelBubble = true
-                    onStartEditText?.(child.id, child.text ?? '')
+                    startEditText?.(child.id, child.text ?? '')
                   }}
                   onDblTap={(e) => {
                     e.cancelBubble = true
-                    onStartEditText?.(child.id, child.text ?? '')
+                    startEditText?.(child.id, child.text ?? '')
                   }}
                 >
                   <Rect
@@ -1217,7 +1223,7 @@ function BoardObjects({
               x={obj.x}
               y={obj.y}
               rotation={obj.rotation ?? 0}
-              draggable
+              draggable={draggable}
               onClick={(e) => {
                 e.cancelBubble = true
                 onObjectClick(obj.id, e.evt.shiftKey)
@@ -1229,11 +1235,11 @@ function BoardObjects({
               {...makeDragHandlers(obj)}
               onDblClick={(e) => {
                 e.cancelBubble = true
-                onStartEditText?.(obj.id, obj.text ?? '')
+                startEditText?.(obj.id, obj.text ?? '')
               }}
               onDblTap={(e) => {
                 e.cancelBubble = true
-                onStartEditText?.(obj.id, obj.text ?? '')
+                startEditText?.(obj.id, obj.text ?? '')
               }}
             >
               <Rect
@@ -1277,7 +1283,7 @@ function BoardObjects({
               x={obj.x}
               y={obj.y}
               rotation={obj.rotation ?? 0}
-              draggable
+              draggable={draggable}
               clipFunc={clipPath}
               onClick={(e) => {
                 e.cancelBubble = true
@@ -1290,11 +1296,11 @@ function BoardObjects({
               {...makeDragHandlers(obj)}
               onDblClick={(e) => {
                 e.cancelBubble = true
-                onStartEditText?.(obj.id, obj.text ?? '')
+                startEditText?.(obj.id, obj.text ?? '')
               }}
               onDblTap={(e) => {
                 e.cancelBubble = true
-                onStartEditText?.(obj.id, obj.text ?? '')
+                startEditText?.(obj.id, obj.text ?? '')
               }}
             >
               <Circle
@@ -1330,7 +1336,7 @@ function BoardObjects({
               x={obj.x}
               y={obj.y}
               rotation={obj.rotation ?? 0}
-              draggable
+              draggable={draggable}
               onClick={(e) => {
                 e.cancelBubble = true
                 onObjectClick(obj.id, e.evt.shiftKey)
@@ -1363,7 +1369,7 @@ function BoardObjects({
               x={obj.x}
               y={obj.y}
               rotation={obj.rotation ?? 0}
-              draggable
+              draggable={draggable}
               onClick={(e) => {
                 e.cancelBubble = true
                 onObjectClick(obj.id, e.evt.shiftKey)
@@ -1375,11 +1381,11 @@ function BoardObjects({
               {...makeDragHandlers(obj)}
               onDblClick={(e) => {
                 e.cancelBubble = true
-                onStartEditText?.(obj.id, obj.text ?? '')
+                startEditText?.(obj.id, obj.text ?? '')
               }}
               onDblTap={(e) => {
                 e.cancelBubble = true
-                onStartEditText?.(obj.id, obj.text ?? '')
+                startEditText?.(obj.id, obj.text ?? '')
               }}
             >
               {isSelected && (
@@ -1419,7 +1425,7 @@ function BoardObjects({
             x={obj.x}
             y={obj.y}
             rotation={obj.rotation ?? 0}
-            draggable
+            draggable={draggable}
             onClick={(e) => {
               e.cancelBubble = true
               onObjectClick(obj.id, e.evt.shiftKey)
@@ -1431,11 +1437,11 @@ function BoardObjects({
             {...makeDragHandlers(obj)}
             onDblClick={(e) => {
               e.cancelBubble = true
-              onStartEditText?.(obj.id, obj.text ?? '')
+              startEditText?.(obj.id, obj.text ?? '')
             }}
             onDblTap={(e) => {
               e.cancelBubble = true
-              onStartEditText?.(obj.id, obj.text ?? '')
+              startEditText?.(obj.id, obj.text ?? '')
             }}
           >
             <Rect
@@ -1531,7 +1537,7 @@ function BoardObjects({
             id={obj.id}
             x={fromX}
             y={fromY}
-            draggable
+            draggable={draggable}
             onClick={(e) => {
               e.cancelBubble = true
               onObjectClick(obj.id, e.evt.shiftKey)

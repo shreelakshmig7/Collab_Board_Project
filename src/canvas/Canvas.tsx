@@ -64,6 +64,7 @@ type CanvasProps = {
   onSelectionDragStart?: (worldPos: { x: number; y: number }) => void
   onSelectionDragMove?: (deltaX: number, deltaY: number) => void
   onSelectionDragEnd?: () => void
+  isViewOnly?: boolean
 }
 
 export default function Canvas({
@@ -99,6 +100,7 @@ export default function Canvas({
   onSelectionDragStart,
   onSelectionDragMove,
   onSelectionDragEnd,
+  isViewOnly = false,
 }: CanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const stageRef = useRef<Konva.Stage>(null)
@@ -745,7 +747,9 @@ export default function Canvas({
             onMultiDragMove={onMultiDragMove}
             pendingConnectorFrom={pendingConnectorFrom}
             onConnectorMoved={onConnectorMoved}
+            readOnly={isViewOnly}
           />
+          {!isViewOnly && (
           <Transformer
             ref={transformerRef}
             rotateEnabled={true}
@@ -761,6 +765,7 @@ export default function Canvas({
             }}
             onTransformEnd={handleTransformEnd}
           />
+          )}
           {/* Multi-select bounding box (single box around all selected objects) */}
           {selectionBoxBounds && (
             <Rect
