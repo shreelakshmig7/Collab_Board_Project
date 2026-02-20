@@ -13,6 +13,9 @@ export const PRESENCE_TIMEOUT_MS = HEARTBEAT_MS * 3
 /** Poll interval for cursor presence when Realtime is not available or cursors table not in publication. */
 export const CURSOR_POLL_MS = 1500
 
+/** Poll interval for global presence list so logouts appear within a few seconds even if Realtime misses the event. */
+export const PRESENCE_POLL_MS = 4000
+
 export const DEFAULT_STICKY_COLOR = '#FEF08A'
 export const DEFAULT_SHAPE_COLOR = '#93C5FD'
 export const DEFAULT_FRAME_COLOR = '#6366f1'

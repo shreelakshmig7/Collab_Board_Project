@@ -9,7 +9,6 @@ import {
   revokeInvite,
   type BoardMemberWithProfile,
   type BoardInvite,
-  type BoardMemberRole,
 } from '../supabase/boardMembers'
 type ShareModalProps = {
   isOpen: boolean
@@ -238,7 +237,7 @@ export default function ShareModal({
                   {isOwner && m.role !== 'owner' && (
                     <>
                       <select
-                        value={m.role === 'owner' ? 'editor' : m.role}
+                        value={m.role}
                         onChange={(e) => handleRoleChange(m.user_id, e.target.value as 'editor' | 'viewer')}
                         className="text-xs border border-gray-200 rounded px-2 py-1 focus:ring-1 focus:ring-blue-500 outline-none"
                         aria-label={`Change role for ${m.display_name || m.email}`}

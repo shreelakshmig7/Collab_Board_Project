@@ -1,11 +1,14 @@
+// @ts-nocheck
 /**
  * Supabase Edge Function: AI command proxy.
  * Keeps ANTHROPIC_API_KEY server-side. Validates JWT before calling Claude.
  */
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
 import { createClient } from 'npm:@supabase/supabase-js@2'
+import { getPolicyForMessage } from './policy.ts'
 
-const MODEL = 'claude-sonnet-4-20250514'
+const COMPLEX_MODEL = Deno.env.get('ANTHROPIC_MODEL_COMPLEX') ?? 'claude-sonnet-4-20250514'
+const SIMPLE_MODEL = Deno.env.get('ANTHROPIC_MODEL_SIMPLE') ?? 'claude-haiku-4-5-20251001'
 const TABLE = 'board_objects'
 
 // Inlined from constants (Deno can't import Vite modules)
@@ -48,7 +51,8 @@ const SYSTEM_PROMPT = `You are an AI assistant that helps users modify a collabo
 
 Object types: sticky, rect, circle, line, frame, connector, text.
 Use domain-appropriate labels for templates (SWOT: Strengths/Weaknesses/etc; Journey: Awareness/Consideration/etc).
-Positioning: x 100-1500, y 100-1000. Call getBoardState first, then execute changes. Make changes immediately.`
+Positioning: x 100-1500, y 100-1000.
+If the request is simple, make the change in a single tool call. Only call getBoardState if the board state is missing or you need to disambiguate.`
 
 type BoardObject = { id: string; type: string; x: number; y: number; width: number; height: number; text?: string; color?: string; rotation?: number; parent_id?: string; from_id?: string; to_id?: string; style?: string; font_size?: number; font_color?: string }
 
@@ -173,13 +177,16 @@ Deno.serve(async (req) => {
     return Response.json({ error: 'userMessage and boardId required' }, { status: 400, headers: corsHeaders })
   }
 
-  const boardStateJson = JSON.stringify(currentObjects ?? [], null, 2)
+  const policy = getPolicyForMessage(userMessage)
+  const modelForRequest = policy.modelTier === 'fast' ? SIMPLE_MODEL : COMPLEX_MODEL
+  const toolsForRequest = policy.allowGetBoardState ? TOOLS : TOOLS.filter((t) => t.name !== 'getBoardState')
+
+  const boardStateJson = JSON.stringify(currentObjects ?? [])
   const messages: { role: string; content: string | unknown[] }[] = [
     { role: 'user', content: `Current board state:\n${boardStateJson}\n\nUser request: ${userMessage}` },
   ]
 
-  const maxTurns = 8
-  for (let turn = 0; turn < maxTurns; turn++) {
+  for (let turn = 0; turn < policy.maxTurns; turn++) {
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -188,11 +195,12 @@ Deno.serve(async (req) => {
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: MODEL,
-        max_tokens: 2048,
+        model: modelForRequest,
+        max_tokens: policy.maxTokens,
         system: SYSTEM_PROMPT,
         messages,
-        tools: TOOLS,
+        tools: toolsForRequest,
+        ...(policy.forcedToolName ? { tool_choice: { type: 'tool', name: policy.forcedToolName } } : {}),
       }),
     })
 
@@ -228,6 +236,14 @@ Deno.serve(async (req) => {
 
     for (let i = 0; i < toolUseBlocks.length; i++) {
       toolResults[i].content = await executeTool(supabase, boardId, toolUseBlocks[i].name, (toolUseBlocks[i].input as Record<string, unknown>) ?? {})
+    }
+
+    if (policy.returnAfterToolExecution) {
+      const summary = toolResults.map((tr) => tr.content).filter(Boolean).join('\n').trim()
+      return Response.json(
+        { text: summary || 'Done.' },
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
     }
     messages.push({ role: 'user', content: toolResults })
   }

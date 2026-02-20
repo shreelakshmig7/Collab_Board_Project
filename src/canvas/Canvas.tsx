@@ -473,6 +473,7 @@ export default function Canvas({
         }
         return
       }
+      if (activeTool !== 'select') return
       if (shiftKey) {
         if (selectedIds.includes(id)) {
           onSelect(selectedIds.filter((sid) => sid !== id))
@@ -483,7 +484,7 @@ export default function Canvas({
         onSelect(selectedIds.length === 1 && selectedIds[0] === id ? [] : [id])
       }
     },
-    [isConnectorTool, pendingConnectorFrom, connectorStyle, selectedIds, onSelect, onConnectorCreated, onAfterCreateObject]
+    [activeTool, isConnectorTool, pendingConnectorFrom, connectorStyle, selectedIds, onSelect, onConnectorCreated, onAfterCreateObject]
   )
 
   const handleStageMouseDown = (e: Konva.KonvaEventObject<MouseEvent>) => {

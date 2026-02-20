@@ -13,6 +13,7 @@ import { signOut } from '../supabase/auth'
 import { getBoard } from '../supabase/boards'
 import type { Board } from '../supabase/boards'
 import { getMyRole, listBoardMembers } from '../supabase/boardMembers'
+import { removePresence } from '../supabase/presence'
 import ShareModal from './ShareModal'
 import type { BoardObject, ConnectorStyle } from '../types/board'
 import { runAICommand } from '../ai/claudeAgent'
@@ -671,8 +672,9 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
     [boardId, selectedIds]
   )
 
-  const handleSignOut = useCallback(() => {
+  const handleSignOut = useCallback(async () => {
     removeAllCursorsForUser(user.uid)
+    await removePresence(user.uid)
     signOut()
   }, [user.uid])
 
@@ -897,28 +899,6 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
           </div>
           {/* Vertical input area */}
           <div className="flex flex-col gap-2 p-3 border-t border-gray-100">
-            <div className="flex items-center gap-1 text-gray-400">
-              <button
-                type="button"
-                className="p-1.5 rounded-lg hover:bg-gray-100 hover:text-gray-600 transition-colors cursor-pointer disabled:opacity-50"
-                disabled
-                aria-label="Attach file (coming soon)"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.414a2 2 0 00-2.828-2.828l-6.414 6.414a4 4 0 11-5.656-5.656l6.586-6.586" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                className="p-1.5 rounded-lg hover:bg-gray-100 hover:text-gray-600 transition-colors cursor-pointer disabled:opacity-50"
-                disabled
-                aria-label="Emoji (coming soon)"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </button>
-            </div>
             <label htmlFor="ai-prompt-input" className="sr-only">
               AI command
             </label>

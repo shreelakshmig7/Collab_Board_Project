@@ -6,6 +6,7 @@ import type { Board } from '../supabase/boards'
 import { signOut } from '../supabase/auth'
 import { deleteAllObjects } from '../supabase/objects'
 import { deleteCursorsForBoard, removeAllCursorsForUser } from '../supabase/cursors'
+import { removePresence } from '../supabase/presence'
 import TopBar from './TopBar'
 
 const LIST_MAX_H = 'max-h-[280px]'
@@ -146,7 +147,11 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
-      <TopBar presenceNames={presenceNames} onSignOut={() => { removeAllCursorsForUser(user.uid); signOut() }} />
+      <TopBar presenceNames={presenceNames} onSignOut={async () => {
+          removeAllCursorsForUser(user.uid)
+          await removePresence(user.uid)
+          signOut()
+        }} />
       <main id="main-content" className="max-w-2xl mx-auto px-6 py-8 flex-1 w-full flex flex-col gap-8">
         {error && (
           <div className="p-4 bg-red-50 text-red-700 rounded-xl text-sm" role="alert">

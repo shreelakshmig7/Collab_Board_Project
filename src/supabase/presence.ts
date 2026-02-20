@@ -1,5 +1,5 @@
 import { supabase } from './config'
-import { PRESENCE_TIMEOUT_MS } from '../constants'
+import { PRESENCE_TIMEOUT_MS, PRESENCE_POLL_MS } from '../constants'
 
 const TABLE = 'presence'
 
@@ -32,13 +32,13 @@ export function upsertPresence(userId: string, displayName: string | null): Prom
   )
 }
 
-/** Remove current user from presence (call on logout / beforeunload). */
-export function removePresence(userId: string) {
-  requireSupabase()
+/** Remove current user from presence (call on logout / beforeunload). Returns a promise so callers can await before signOut. */
+export async function removePresence(userId: string): Promise<void> {
+  const { error } = await requireSupabase()
     .from(TABLE)
     .delete()
     .eq('user_id', userId)
-    .then(({ error }) => error && console.error('removePresence', error))
+  if (error) console.error('removePresence', error)
 }
 
 /** Subscribe to the list of online users. Callback receives all rows in presence (show on login, remove on logout); call removePresence on cleanup. */
@@ -76,7 +76,9 @@ export function subscribePresence(
         console.warn('[Realtime] presence subscription status:', status, err ?? '')
       }
     })
+  const pollId = setInterval(fetchAndNotify, PRESENCE_POLL_MS)
   return () => {
+    clearInterval(pollId)
     db.removeChannel(channel)
   }
 }
