@@ -10,9 +10,7 @@ import {
   sanitizeObjectText,
   clampDimension,
   validateDimensions,
-  MIN_BOARD_NAME_LENGTH,
   MAX_BOARD_NAME_LENGTH,
-  MIN_INVITE_EMAIL_LENGTH,
   MAX_AI_PROMPT_LENGTH,
   MAX_OBJECT_TEXT_LENGTH,
 } from './inputValidation'
