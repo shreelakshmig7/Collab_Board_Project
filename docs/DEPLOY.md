@@ -39,6 +39,8 @@ Without this, Google sign-in redirect after login may fail on the deployed app.
 then create the secure policy:  
 `CREATE POLICY "Users can read own boards" ON boards FOR SELECT TO authenticated USING (auth.uid() = user_id);`
 
+**Board sharing (invites, "Shared with you"):** For User2 to see boards that User1 shared with them, the **board sharing** section of [supabase/schema.sql](../supabase/schema.sql) must be applied. That adds the `board_members` table, helper functions (`is_board_member`, etc.), and RLS policies such as **"Members can read board"** on `boards` (so `listBoards()` returns boards where the current user is in `board_members`). Without this, shared boards never appear for the invited user. Run the full schema or at least the block from "Board sharing" through the end of the RLS section. See [BOARD_SHARING_SPEC.md](BOARD_SHARING_SPEC.md).
+
 **Realtime (required for other user’s cursor + object moves to show):**
 
 1. In Supabase Dashboard go to **Database** → **Replication** (or **Publications**).

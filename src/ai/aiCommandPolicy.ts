@@ -1,4 +1,4 @@
-export type AiCommandMode = 'simple' | 'complex'
+export type AiCommandMode = 'simple' | 'compound' | 'complex'
 
 export type AiCommandPolicy = {
   mode: AiCommandMode
@@ -9,8 +9,13 @@ export type AiCommandPolicy = {
 }
 
 const CREATION_RE = /\b(add|create|new|put|place|draw|make)\b/i
-const COMPLEX_RE = /\b(arrange|grid|swot|journey|retro|template)\b/i
+const CONNECTOR_RE = /\b(connect|connector|arrow)\b/i
 const MULTI_STEP_RE = /\b(and|then|also)\b/i
+const ARRANGE_RE = /\b(arrange|space|align|distribute)\b/i
+
+const CLEAR_RE = /\b(clear|wipe|reset|start\s+fresh|delete\s+all|remove\s+all|erase\s+all)\b/i
+const QUADRANT_RE = /\b(swot|quadrant|2x2|four[\s-]quadrant|matrix\s+diagram)\b/i
+const COLUMN_RE = /\b(retro|retrospective|kanban|user[\s-]journey|journey[\s-]map|column[\s-]layout)\b/i
 
 const STICKY_RE = /\b(sticky|sticky-note|post-it)\b/i
 const FRAME_RE = /\bframe\b/i
@@ -18,26 +23,34 @@ const TEXT_RE = /\btext\b/i
 const SHAPE_RE = /\b(rect|rectangle|square|circle|line)\b/i
 
 /**
- * Heuristic policy for the Edge Function.
- * Goal: keep "simple" commands single-turn and avoid tool loops.
+ * Client-side policy mirror — kept in sync with the edge function policy.ts.
+ * Used for UI decisions (e.g. which board state to send) before the request.
  */
 export const getAiCommandPolicy = (userMessage: string): AiCommandPolicy => {
   const msg = userMessage.trim()
   const msgLc = msg.toLowerCase()
 
+  if (CLEAR_RE.test(msg)) {
+    return { mode: 'compound', maxTurns: 1, maxTokens: 512, allowGetBoardState: false, forcedToolName: 'clearBoard' }
+  }
+
+  if (QUADRANT_RE.test(msg)) {
+    return { mode: 'compound', maxTurns: 1, maxTokens: 1024, allowGetBoardState: false, forcedToolName: 'createQuadrant' }
+  }
+
+  if (COLUMN_RE.test(msg)) {
+    return { mode: 'compound', maxTurns: 1, maxTokens: 1024, allowGetBoardState: false, forcedToolName: 'createColumnLayout' }
+  }
+
   const looksComplex =
-    COMPLEX_RE.test(msg) ||
+    ARRANGE_RE.test(msg) ||
+    CONNECTOR_RE.test(msg) ||
     MULTI_STEP_RE.test(msg) ||
-    // Common multi-action patterns that imply multiple tool calls
-    /\b(connect|connector|arrow)\b/i.test(msg)
+    /\btemplate\b/i.test(msg) ||
+    /\bgrid\b/i.test(msg)
 
   if (looksComplex) {
-    return {
-      mode: 'complex',
-      maxTurns: 8,
-      maxTokens: 2048,
-      allowGetBoardState: true,
-    }
+    return { mode: 'complex', maxTurns: 8, maxTokens: 2048, allowGetBoardState: true }
   }
 
   const isCreation = CREATION_RE.test(msg)
@@ -53,36 +66,16 @@ export const getAiCommandPolicy = (userMessage: string): AiCommandPolicy => {
               ? 'createShape'
               : undefined
 
-    return {
-      mode: 'simple',
-      maxTurns: 1,
-      maxTokens: 512,
-      allowGetBoardState: false,
-      forcedToolName,
-    }
+    return { mode: 'simple', maxTurns: 1, maxTokens: 512, allowGetBoardState: false, forcedToolName }
   }
 
-  // Non-template transforms/ops (move/delete/resize/rotate/etc.) should also be single-turn.
-  // They should be resolvable from the provided board state (client sends it for relevant commands).
   const isOp =
-    /\b(move|drag|delete|remove|resize|rotate|change|update)\b/i.test(msgLc) ||
+    /\b(move|drag|delete|remove|resize|rotate|change|update|rename)\b/i.test(msgLc) ||
     /\bcolor\b/i.test(msgLc)
 
   if (isOp) {
-    return {
-      mode: 'simple',
-      maxTurns: 1,
-      maxTokens: 512,
-      allowGetBoardState: false,
-    }
+    return { mode: 'complex', maxTurns: 3, maxTokens: 1024, allowGetBoardState: true }
   }
 
-  // Default to complex (safer).
-  return {
-    mode: 'complex',
-    maxTurns: 8,
-    maxTokens: 2048,
-    allowGetBoardState: true,
-  }
+  return { mode: 'complex', maxTurns: 8, maxTokens: 2048, allowGetBoardState: true }
 }
-

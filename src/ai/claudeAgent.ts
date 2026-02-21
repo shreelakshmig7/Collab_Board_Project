@@ -42,9 +42,10 @@ export async function runAICommand(
   const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 
   const messageLC = userMessage.trim().toLowerCase()
-  const isComplexCommand = /arrange|grid|swot|journey|retro|template/.test(messageLC)
+  // Sync with policy.ts: anything that needs board context gets currentObjects
+  const isComplexCommand = /arrange|grid|swot|journey|retro|template|space|align|distribute|kanban/.test(messageLC)
   const isCreationCommand = /create|add|new|put|place|draw|make/.test(messageLC)
-  const isObjectRefCommand = /move|delete|remove|change.*color|update.*color/.test(messageLC)
+  const isObjectRefCommand = /\b(move|drag|delete|remove|resize|rotate|change|update|rename)\b|color/.test(messageLC)
 
   const objectsToSend: BoardObject[] =
     isComplexCommand || isCreationCommand || isObjectRefCommand

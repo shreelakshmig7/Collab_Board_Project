@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import type { AppUser } from '../types/user'
 import { listBoards, createBoard, deleteBoard, updateBoard } from '../supabase/boards'
 import { validateBoardName, sanitizeBoardName } from '../utils/inputValidation'
@@ -8,6 +8,7 @@ import { signOut } from '../supabase/auth'
 import { deleteAllObjects } from '../supabase/objects'
 import { deleteCursorsForBoard, removeAllCursorsForUser } from '../supabase/cursors'
 import { removePresence } from '../supabase/presence'
+import { BOARD_LIST_POLL_MS } from '../constants'
 import TopBar from './TopBar'
 
 const LIST_MAX_H = 'max-h-[280px]'
@@ -30,6 +31,7 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
   const [createValidationError, setCreateValidationError] = useState<string | null>(null)
   const [renameValidationError, setRenameValidationError] = useState<string | null>(null)
   const navigate = useNavigate()
+  const location = useLocation()
 
   const myBoards = boards.filter((b) => b.user_id === user.uid)
   const sharedBoards = boards.filter((b) => b.user_id !== user.uid)
@@ -49,7 +51,46 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
     return () => {
       cancelled = true
     }
-  }, [user.uid])
+  }, [user.uid, location.pathname])
+
+  useEffect(() => {
+    let cancelled = false
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== 'visible' || location.pathname !== '/') return
+      listBoards()
+        .then((list) => {
+          if (!cancelled) setBoards(list)
+        })
+        .catch((err: unknown) => {
+          if (!cancelled) setError(err instanceof Error ? err.message : String(err))
+        })
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      cancelled = true
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [user.uid, location.pathname])
+
+  useEffect(() => {
+    if (location.pathname !== '/') return
+    let cancelled = false
+    const poll = () => {
+      if (document.visibilityState !== 'visible' || cancelled) return
+      listBoards()
+        .then((list) => {
+          if (!cancelled) setBoards(list)
+        })
+        .catch((err: unknown) => {
+          if (!cancelled) setError(err instanceof Error ? err.message : String(err))
+        })
+    }
+    const intervalId = setInterval(poll, BOARD_LIST_POLL_MS)
+    return () => {
+      cancelled = true
+      clearInterval(intervalId)
+    }
+  }, [user.uid, location.pathname])
 
   const handleCreateBoard = async (e: React.FormEvent) => {
     e.preventDefault()

@@ -16,6 +16,9 @@ export const CURSOR_POLL_MS = 1500
 /** Poll interval for global presence list so logouts appear within a few seconds even if Realtime misses the event. */
 export const PRESENCE_POLL_MS = 4000
 
+/** Poll interval for boards list so shared boards appear without refresh when another user adds you. */
+export const BOARD_LIST_POLL_MS = 15_000
+
 export const DEFAULT_STICKY_COLOR = '#FEF08A'
 export const DEFAULT_SHAPE_COLOR = '#93C5FD'
 export const DEFAULT_FRAME_COLOR = '#6366f1'
