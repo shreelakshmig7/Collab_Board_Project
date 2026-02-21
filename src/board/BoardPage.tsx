@@ -197,19 +197,19 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
     (id: string) => {
       draggingIdRef.current = id
       if (selectedIds.includes(id) && selectedIds.length > 1) {
-        setObjects((prev) => {
-          const positions = new Map<string, { x: number; y: number }>()
-          for (const obj of prev) {
-            if (selectedIds.includes(obj.id)) {
-              positions.set(obj.id, { x: obj.x, y: obj.y })
-            }
+        // Populate synchronously from current objects so the ref is ready before
+        // the first onDragMove fires (React 18 batching means setObjects updaters
+        // may not run until after the first drag-move event).
+        const positions = new Map<string, { x: number; y: number }>()
+        for (const obj of objects) {
+          if (selectedIds.includes(obj.id)) {
+            positions.set(obj.id, { x: obj.x, y: obj.y })
           }
-          dragStartPositionsRef.current = positions
-          return prev
-        })
+        }
+        dragStartPositionsRef.current = positions
       }
     },
-    [selectedIds]
+    [selectedIds, objects]
   )
 
   const handleDragEnd = useCallback(() => {
@@ -236,10 +236,16 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
     dragStartPositionsRef.current = new Map()
   }, [boardId, selectedIds, clearConnectorOverridesFor])
 
-  /** Called during multi-drag: move all selected objects (including the dragged one) by the same delta so state stays in sync and the dragged object does not snap back on re-render */
+  /** Called during multi-drag with the dragged object's current absolute Konva position.
+   *  Computes delta from the frozen drag-start position so all selected objects move correctly
+   *  regardless of how many React re-renders have occurred since drag started. */
   const handleMultiDragMove = useCallback(
-    (_movedId: string, deltaX: number, deltaY: number) => {
+    (movedId: string, currentX: number, currentY: number) => {
       if (selectedIds.length <= 1) return
+      const movedStart = dragStartPositionsRef.current.get(movedId)
+      if (!movedStart) return
+      const deltaX = currentX - movedStart.x
+      const deltaY = currentY - movedStart.y
       setObjects((prev) =>
         prev.map((o) => {
           if (!selectedIds.includes(o.id)) return o
@@ -257,17 +263,15 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
 
   const handleSelectionDragStart = useCallback(
     (_worldPos: { x: number; y: number }) => {
-      setObjects((prev) => {
-        const positions = new Map<string, { x: number; y: number }>()
-        for (const obj of prev) {
-          if (selectedIds.includes(obj.id)) positions.set(obj.id, { x: obj.x, y: obj.y })
-        }
-        dragStartPositionsRef.current = positions
-        selectionDragLastPositionsRef.current = new Map(positions)
-        return prev
-      })
+      // Populate synchronously so refs are ready before the first mousemove fires.
+      const positions = new Map<string, { x: number; y: number }>()
+      for (const obj of objects) {
+        if (selectedIds.includes(obj.id)) positions.set(obj.id, { x: obj.x, y: obj.y })
+      }
+      dragStartPositionsRef.current = positions
+      selectionDragLastPositionsRef.current = new Map(positions)
     },
-    [selectedIds]
+    [selectedIds, objects]
   )
 
   const handleSelectionDragMove = useCallback(

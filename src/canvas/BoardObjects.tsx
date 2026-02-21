@@ -182,9 +182,7 @@ function BoardObjects({
       const { x: nodeX, y: nodeY } = getDragPosition(e, obj.id)
       throttleDragUpdate(obj.id, nodeX, nodeY)
       if (isMultiSelect && selectedIds.includes(obj.id)) {
-        const deltaX = nodeX - obj.x
-        const deltaY = nodeY - obj.y
-        onMultiDragMove?.(obj.id, deltaX, deltaY)
+        onMultiDragMove?.(obj.id, nodeX, nodeY)
       }
     },
     onDragEnd: (e: Konva.KonvaEventObject<MouseEvent>) => {
@@ -301,6 +299,9 @@ function BoardObjects({
               e.cancelBubble = true
               const { x, y } = getDragPosition(e, obj.id)
               throttleDragUpdate(obj.id, x, y)
+              if (isMultiSelect && selectedIds.includes(obj.id)) {
+                onMultiDragMove?.(obj.id, x, y)
+              }
             }}
             onDragEnd={(e) => {
               e.cancelBubble = true

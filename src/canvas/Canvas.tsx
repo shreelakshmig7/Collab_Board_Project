@@ -537,33 +537,36 @@ export default function Canvas({
     const world = getWorldPos(stage)
     if (!world) return
 
-    // Select tool: if click is inside selection box (empty space between selected objects), drag whole selection; otherwise start marquee
+    // If click is inside the multi-select bounding box, drag the whole selection —
+    // regardless of active tool (so it works even when no tool / non-select tool is active).
+    const insideSelectionBox =
+      selectionBoxBounds &&
+      world.x >= selectionBoxBounds.x &&
+      world.x <= selectionBoxBounds.x + selectionBoxBounds.width &&
+      world.y >= selectionBoxBounds.y &&
+      world.y <= selectionBoxBounds.y + selectionBoxBounds.height
+    if (
+      selectedIds.length > 0 &&
+      insideSelectionBox &&
+      onSelectionDragStart &&
+      onSelectionDragMove &&
+      onSelectionDragEnd
+    ) {
+      selectionDragStartWorldRef.current = world
+      onSelectionDragStart(world)
+      setIsSelectionDragging(true)
+      return
+    }
+
+    // Select tool (and click was NOT inside selection box): start marquee
     if (activeTool === 'select') {
-      const insideSelectionBox =
-        selectionBoxBounds &&
-        world.x >= selectionBoxBounds.x &&
-        world.x <= selectionBoxBounds.x + selectionBoxBounds.width &&
-        world.y >= selectionBoxBounds.y &&
-        world.y <= selectionBoxBounds.y + selectionBoxBounds.height
-      if (
-        selectedIds.length > 0 &&
-        insideSelectionBox &&
-        onSelectionDragStart &&
-        onSelectionDragMove &&
-        onSelectionDragEnd
-      ) {
-        selectionDragStartWorldRef.current = world
-        onSelectionDragStart(world)
-        setIsSelectionDragging(true)
-        return
-      }
       marqueeShiftKeyRef.current = e.evt.shiftKey
       setMarqueeStart(world)
       setMarqueeCurrent(world)
       return
     }
 
-    // Click+drag on empty canvas = pan
+    // Click+drag on empty canvas (no selection, not select tool) = pan
     const pointer = stage.getPointerPosition()
     if (!pointer) return
     setIsPanning(true)
