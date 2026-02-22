@@ -13,6 +13,7 @@
     "test:ui": "vitest --ui"
   },
   "dependencies": {
+    "@collab-board/placement-utils": "file:packages/placement-utils",
     "@anthropic-ai/sdk": "^0.75.0",
     "@supabase/supabase-js": "^2.96.0",
     "konva": "^9.3.6",

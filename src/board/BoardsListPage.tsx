@@ -13,6 +13,18 @@ import TopBar from './TopBar'
 
 const LIST_MAX_H = 'max-h-[280px]'
 
+const BOARDS_LIST_CONNECTION_MSG = 'Connection error. Check your network and try again.'
+
+/** Normalize caught error to a display string. Never returns "[object Object]". */
+function normalizeListError(err: unknown): string {
+  if (err instanceof Error) return err.message
+  if (err !== null && typeof err === 'object' && 'message' in err) {
+    return normalizeListError((err as { message: unknown }).message)
+  }
+  const s = String(err)
+  return s === '[object Object]' || s.includes('[object Object]') ? BOARDS_LIST_CONNECTION_MSG : s
+}
+
 type BoardsListPageProps = { user: AppUser; presenceNames: string[] }
 
 export default function BoardsListPage({ user, presenceNames }: BoardsListPageProps) {
@@ -43,7 +55,7 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
         if (!cancelled) setBoards(list)
       })
       .catch((err: unknown) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err))
+        if (!cancelled) setError(normalizeListError(err))
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -62,7 +74,7 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
           if (!cancelled) setBoards(list)
         })
         .catch((err: unknown) => {
-          if (!cancelled) setError(err instanceof Error ? err.message : String(err))
+          if (!cancelled) setError(normalizeListError(err))
         })
     }
     document.addEventListener('visibilitychange', handleVisibilityChange)
@@ -82,7 +94,7 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
           if (!cancelled) setBoards(list)
         })
         .catch((err: unknown) => {
-          if (!cancelled) setError(err instanceof Error ? err.message : String(err))
+          if (!cancelled) setError(normalizeListError(err))
         })
     }
     const intervalId = setInterval(poll, BOARD_LIST_POLL_MS)
@@ -91,6 +103,18 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
       clearInterval(intervalId)
     }
   }, [user.uid, location.pathname])
+
+  // Clear error and refetch boards when back online
+  useEffect(() => {
+    const handleOnline = () => {
+      setError(null)
+      listBoards()
+        .then((list) => setBoards(list))
+        .catch(() => {})
+    }
+    window.addEventListener('online', handleOnline)
+    return () => window.removeEventListener('online', handleOnline)
+  }, [])
 
   const handleCreateBoard = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -109,7 +133,7 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
       setNewBoardName('')
       navigate(`/board/${board.id}`, { replace: true })
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(normalizeListError(err))
     } finally {
       setCreating(false)
     }
@@ -152,7 +176,7 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
       setSelectedIds(new Set())
       setShowDeleteConfirm(false)
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(normalizeListError(err))
     } finally {
       setDeleting(false)
     }
@@ -187,7 +211,7 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
       setShowRenameModal(false)
       setRenameValue('')
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(normalizeListError(err))
     } finally {
       setRenaming(false)
     }
@@ -220,7 +244,7 @@ export default function BoardsListPage({ user, presenceNames }: BoardsListPagePr
       <main id="main-content" className="max-w-2xl mx-auto px-6 py-8 flex-1 w-full flex flex-col gap-8">
         {error && (
           <div className="p-4 bg-red-50 text-red-700 rounded-xl text-sm" role="alert">
-            {error}
+            {normalizeListError(error)}
           </div>
         )}
 

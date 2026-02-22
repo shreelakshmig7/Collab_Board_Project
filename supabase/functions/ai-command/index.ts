@@ -6,6 +6,7 @@
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
 import { createClient } from 'npm:@supabase/supabase-js@2'
 import { getPolicyForMessage } from './policy.ts'
+import { resolvePlacement, resolveBulkPlacement } from './placement.ts'
 
 const COMPLEX_MODEL = Deno.env.get('ANTHROPIC_MODEL_COMPLEX') ?? 'claude-sonnet-4-20250514'
 const SIMPLE_MODEL = Deno.env.get('ANTHROPIC_MODEL_SIMPLE') ?? 'claude-haiku-4-5-20251001'
@@ -202,6 +203,24 @@ const TOOLS = [
     description: 'Remove every object from the board. Use when the user wants to clear, wipe, or reset the board.',
     input_schema: { type: 'object' as const, properties: {}, required: [] },
   },
+  {
+    name: 'createBulkObjects',
+    description: 'Create many objects (3 or more) of the same type in one batch. Use for any request to create multiple objects (e.g. "50 sticky notes", "20 rectangles", "a dozen frames"). Provide objectType and count; optionally provide items (text content per object) or a topic for auto-generated labels. Server computes all positions and batch-inserts in one transaction — do not use individual create tools in a loop for bulk requests.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        objectType: { type: 'string', enum: ['sticky', 'rect', 'circle', 'frame', 'text'], description: 'Type of object to create' },
+        count: { type: 'number', description: 'Number of objects to create (max 500)' },
+        items: { type: 'array', items: { type: 'string' }, description: 'Optional text content for each object. If fewer than count, remaining get auto-numbered labels.' },
+        topic: { type: 'string', description: 'Topic for auto-generated labels, e.g. "project risk" produces "project risk 1", "project risk 2"' },
+        color: { type: 'string', description: 'Hex color for all objects. Omit to use the type default.' },
+        layout: { type: 'string', enum: ['grid', 'scattered'], description: 'Arrangement pattern. Defaults to grid.' },
+        startX: { type: 'number' },
+        startY: { type: 'number' },
+      },
+      required: ['objectType', 'count'],
+    },
+  },
 ]
 
 const SYSTEM_PROMPT = `You are an AI assistant that helps users modify a collaborative whiteboard in real time. You always act directly with tools — never ask the user for information.
@@ -209,6 +228,7 @@ const SYSTEM_PROMPT = `You are an AI assistant that helps users modify a collabo
 CRITICAL RULES:
 - Never ask the user for object IDs, coordinates, dimensions, or any other values. Always find them yourself using getBoardState or the inline board state.
 - If the user asks to modify existing objects (move, resize, change color, delete, arrange, space evenly) and the inline board state is empty or missing, call getBoardState first to get the current objects.
+- If the user is asking about existing objects (counting, listing, describing — e.g. "how many objects", "what's on the board") and the inline board state is empty, always call getBoardState first before answering.
 - When size or position is not specified, make a reasonable choice (e.g. 1.5× current size for resize, place near x=100 y=100 for new objects).
 
 Object types: sticky, rect, circle, line, frame, connector, text.
@@ -219,7 +239,7 @@ Use domain-appropriate content for templates:
 - Journey map: Awareness / Consideration / Purchase / Retention / Advocacy
 - Retrospective: What Went Well / What Didn't / Action Items
 
-Compound tools (createQuadrant, createColumnLayout, clearBoard) build the full layout server-side in one call. Prefer them for templates and board resets — do not try to recreate their output with multiple individual tool calls.
+Compound tools (createBulkObjects, createQuadrant, createColumnLayout, clearBoard) build the full layout server-side in one call. Use createBulkObjects for any request creating 3 or more objects of the same type — never call individual create tools in a loop for bulk requests. Prefer the other compound tools for templates and board resets.
 
 For simple commands, make the change in a single tool call. Only call getBoardState when you need to identify specific existing objects by their id.`
 
@@ -241,6 +261,69 @@ type BoardObject = {
   font_color?: string
 }
 
+// ── Bulk object creator ─────────────────────────────────────────────────────
+
+async function executeCreateBulkObjects(
+  supabase: ReturnType<typeof createClient>,
+  boardId: string,
+  input: Record<string, unknown>,
+  objectsForPlacement: { id: string; x: number; y: number; width: number; height: number }[],
+  viewportBounds: { x: number; y: number; width: number; height: number } | null
+): Promise<{ content: string; createdCenter: { x: number; y: number } }> {
+  const objectType = String(input.objectType ?? 'sticky')
+  const count = Math.min(Math.max(1, Number(input.count ?? 1)), 500)
+  const items = Array.isArray(input.items) ? (input.items as string[]) : []
+  const topic = input.topic ? String(input.topic) : null
+  const layout = String(input.layout ?? 'grid')
+  let startX = Number(input.startX ?? 100)
+  let startY = Number(input.startY ?? 100)
+
+  let w: number, h: number, defaultColor: string
+  switch (objectType) {
+    case 'circle': w = CIRCLE_DIAMETER;     h = CIRCLE_DIAMETER;      defaultColor = DEFAULT_SHAPE_COLOR;  break
+    case 'rect':   w = STICKY_WIDTH;        h = STICKY_HEIGHT;        defaultColor = DEFAULT_SHAPE_COLOR;  break
+    case 'frame':  w = FRAME_DEFAULT_WIDTH; h = FRAME_DEFAULT_HEIGHT; defaultColor = DEFAULT_FRAME_COLOR;  break
+    case 'text':   w = 200;                 h = 80;                   defaultColor = DEFAULT_TEXT_COLOR;   break
+    default:       w = STICKY_WIDTH;        h = STICKY_HEIGHT;        defaultColor = DEFAULT_STICKY_COLOR; break
+  }
+
+  const color = input.color ? String(input.color) : defaultColor
+  const gap = objectType === 'frame' ? 40 : 20
+  const columns = Math.ceil(Math.sqrt(count))
+  const cellW = w + gap
+  const cellH = h + gap
+  const layoutW = columns * cellW
+  const layoutH = Math.ceil(count / columns) * cellH
+  const { x: resolvedX, y: resolvedY } = resolveBulkPlacement(startX, startY, layoutW, layoutH, objectsForPlacement, 2, viewportBounds)
+  startX = resolvedX
+  startY = resolvedY
+
+  const rows: Record<string, unknown>[] = []
+  for (let i = 0; i < count; i++) {
+    const id = crypto.randomUUID()
+    const label = items[i] ?? (topic ? `${topic} ${i + 1}` : `${objectType} ${i + 1}`)
+
+    const x = startX + (i % columns) * cellW
+    const y = startY + Math.floor(i / columns) * cellH
+
+    const base = { board_id: boardId, id, type: objectType, x, y, width: w, height: h }
+    switch (objectType) {
+      case 'sticky': rows.push({ ...base, text: label, color }); break
+      case 'rect':
+      case 'circle': rows.push({ ...base, color }); break
+      case 'frame':  rows.push({ ...base, text: label, color }); break
+      case 'text':   rows.push({ ...base, text: label, font_size: TEXT_DEFAULT_FONT_SIZE, font_color: color }); break
+      default:       rows.push({ ...base, text: label, color }); break
+    }
+  }
+
+  const { error } = await supabase.from(TABLE).insert(rows)
+  if (error) throw error
+  const content = `Created ${count} ${objectType} objects in a ${layout} layout`
+  const createdCenter = { x: startX + layoutW / 2, y: startY + layoutH / 2 }
+  return { content, createdCenter }
+}
+
 // ── Compound tool helpers ───────────────────────────────────────────────────
 
 // Each quadrant is a nested frame — the canvas automatically renders the colored header bar.
@@ -248,11 +331,16 @@ type BoardObject = {
 async function executeCreateQuadrant(
   supabase: ReturnType<typeof createClient>,
   boardId: string,
-  input: Record<string, unknown>
-): Promise<string> {
+  input: Record<string, unknown>,
+  objectsForPlacement: { id: string; x: number; y: number; width: number; height: number }[],
+  viewportBounds: { x: number; y: number; width: number; height: number } | null
+): Promise<{ content: string; createdCenter: { x: number; y: number } }> {
   const title = String(input.title ?? 'Quadrant Diagram')
-  const startX = Number(input.x ?? 100)
-  const startY = Number(input.y ?? 100)
+  let startX = Number(input.x ?? 100)
+  let startY = Number(input.y ?? 100)
+  const { x: resolvedX, y: resolvedY } = resolveBulkPlacement(startX, startY, QUAD_OUTER_W, QUAD_OUTER_H, objectsForPlacement, 2, viewportBounds)
+  startX = resolvedX
+  startY = resolvedY
   const labels = (input.quadrantLabels ?? {}) as Record<string, string>
   const items = (input.items ?? {}) as Record<string, string[]>
 
@@ -309,18 +397,22 @@ async function executeCreateQuadrant(
     }
   }
 
-  return `Created quadrant diagram "${title}" with ${created.length} elements`
+  const content = `Created quadrant diagram "${title}" with ${created.length} elements`
+  const createdCenter = { x: startX + QUAD_OUTER_W / 2, y: startY + QUAD_OUTER_H / 2 }
+  return { content, createdCenter }
 }
 
 // Each column is a nested frame — the canvas automatically renders the colored header bar.
 async function executeCreateColumnLayout(
   supabase: ReturnType<typeof createClient>,
   boardId: string,
-  input: Record<string, unknown>
-): Promise<string> {
+  input: Record<string, unknown>,
+  objectsForPlacement: { id: string; x: number; y: number; width: number; height: number }[],
+  viewportBounds: { x: number; y: number; width: number; height: number } | null
+): Promise<{ content: string; createdCenter: { x: number; y: number } }> {
   const title = String(input.title ?? 'Column Layout')
-  const startX = Number(input.x ?? 100)
-  const startY = Number(input.y ?? 100)
+  let startX = Number(input.x ?? 100)
+  let startY = Number(input.y ?? 100)
   const columns = Array.isArray(input.columns)
     ? (input.columns as Array<{ name: string; items?: string[]; color?: string }>)
     : []
@@ -334,6 +426,9 @@ async function executeCreateColumnLayout(
   )
   const outerW = columns.length * COL_INNER_W + (columns.length - 1) * COL_GAP + 2 * COL_OUTER_PAD
   const outerH = COL_OUTER_TITLE_H + COL_OUTER_PAD + innerH + COL_OUTER_PAD
+  const { x: resolvedX, y: resolvedY } = resolveBulkPlacement(startX, startY, outerW, outerH, objectsForPlacement, 2, viewportBounds)
+  startX = resolvedX
+  startY = resolvedY
 
   const created: string[] = []
 
@@ -380,8 +475,12 @@ async function executeCreateColumnLayout(
     }
   }
 
-  return `Created column layout "${title}" with ${created.length} elements`
+  const content = `Created column layout "${title}" with ${created.length} elements`
+  const createdCenter = { x: startX + outerW / 2, y: startY + outerH / 2 }
+  return { content, createdCenter }
 }
+
+type ToolResult = string | { content: string; createdCenter?: { x: number; y: number } }
 
 // ── Tool executor ───────────────────────────────────────────────────────────
 
@@ -389,9 +488,12 @@ async function executeTool(
   supabase: ReturnType<typeof createClient>,
   boardId: string,
   name: string,
-  input: Record<string, unknown>
-): Promise<string> {
+  input: Record<string, unknown>,
+  placementObjects: { id: string; x: number; y: number; width: number; height: number }[],
+  viewportBounds: { x: number; y: number; width: number; height: number } | null
+): Promise<ToolResult> {
   const cols = 'id,type,x,y,width,height,text,color,rotation,parent_id,from_id,to_id,style,font_size,font_color'
+  const objectsForPlacement = placementObjects
   try {
     switch (name) {
       case 'getBoardState': {
@@ -411,8 +513,11 @@ async function executeTool(
 
       case 'createStickyNote': {
         const id = crypto.randomUUID()
-        await supabase.from(TABLE).insert({ board_id: boardId, id, type: 'sticky', x: input.x, y: input.y, width: STICKY_WIDTH, height: STICKY_HEIGHT, text: input.text ?? '', color: input.color ?? DEFAULT_STICKY_COLOR })
-        return `Created sticky note with id ${id}`
+        const x = Number(input.x ?? 100)
+        const y = Number(input.y ?? 100)
+        const { x: px, y: py } = resolvePlacement({ x, y, width: STICKY_WIDTH, height: STICKY_HEIGHT }, objectsForPlacement, viewportBounds, 2)
+        await supabase.from(TABLE).insert({ board_id: boardId, id, type: 'sticky', x: px, y: py, width: STICKY_WIDTH, height: STICKY_HEIGHT, text: input.text ?? '', color: input.color ?? DEFAULT_STICKY_COLOR })
+        return { content: `Created sticky note with id ${id}`, createdCenter: { x: px, y: py } }
       }
 
       case 'createShape': {
@@ -420,14 +525,22 @@ async function executeTool(
         const t = input.type as string
         const w = t === 'circle' ? (input.width ?? CIRCLE_DIAMETER) : t === 'line' ? (input.width ?? LINE_DEFAULT_WIDTH) : (input.width ?? STICKY_WIDTH)
         const h = t === 'circle' ? w : t === 'line' ? (input.height ?? LINE_DEFAULT_HEIGHT) : (input.height ?? STICKY_HEIGHT)
-        await supabase.from(TABLE).insert({ board_id: boardId, id, type: t, x: input.x, y: input.y, width: w, height: h, color: input.color ?? DEFAULT_SHAPE_COLOR })
-        return `Created ${t} with id ${id}`
+        const x = Number(input.x ?? 100)
+        const y = Number(input.y ?? 100)
+        const { x: px, y: py } = resolvePlacement({ x, y, width: w, height: h }, objectsForPlacement, viewportBounds, 2)
+        await supabase.from(TABLE).insert({ board_id: boardId, id, type: t, x: px, y: py, width: w, height: h, color: input.color ?? DEFAULT_SHAPE_COLOR })
+        return { content: `Created ${t} with id ${id}`, createdCenter: { x: px, y: py } }
       }
 
       case 'createFrame': {
         const id = crypto.randomUUID()
-        await supabase.from(TABLE).insert({ board_id: boardId, id, type: 'frame', x: input.x, y: input.y, width: input.width ?? FRAME_DEFAULT_WIDTH, height: input.height ?? FRAME_DEFAULT_HEIGHT, text: input.title ?? 'Frame', color: input.color ?? DEFAULT_FRAME_COLOR })
-        return `Created frame with id ${id}`
+        const w = Number(input.width ?? FRAME_DEFAULT_WIDTH)
+        const h = Number(input.height ?? FRAME_DEFAULT_HEIGHT)
+        const x = Number(input.x ?? 100)
+        const y = Number(input.y ?? 100)
+        const { x: px, y: py } = resolvePlacement({ x, y, width: w, height: h }, objectsForPlacement, viewportBounds, 2)
+        await supabase.from(TABLE).insert({ board_id: boardId, id, type: 'frame', x: px, y: py, width: w, height: h, text: input.title ?? 'Frame', color: input.color ?? DEFAULT_FRAME_COLOR })
+        return { content: `Created frame with id ${id}`, createdCenter: { x: px, y: py } }
       }
 
       case 'createConnector': {
@@ -438,8 +551,13 @@ async function executeTool(
 
       case 'createText': {
         const id = crypto.randomUUID()
-        await supabase.from(TABLE).insert({ board_id: boardId, id, type: 'text', x: input.x, y: input.y, width: 200, height: 80, text: input.text ?? '', font_size: input.fontSize ?? TEXT_DEFAULT_FONT_SIZE, font_color: input.fontColor ?? DEFAULT_TEXT_COLOR })
-        return `Created text with id ${id}`
+        const tw = 200
+        const th = 80
+        const x = Number(input.x ?? 100)
+        const y = Number(input.y ?? 100)
+        const { x: px, y: py } = resolvePlacement({ x, y, width: tw, height: th }, objectsForPlacement, viewportBounds, 2)
+        await supabase.from(TABLE).insert({ board_id: boardId, id, type: 'text', x: px, y: py, width: tw, height: th, text: input.text ?? '', font_size: input.fontSize ?? TEXT_DEFAULT_FONT_SIZE, font_color: input.fontColor ?? DEFAULT_TEXT_COLOR })
+        return { content: `Created text with id ${id}`, createdCenter: { x: px, y: py } }
       }
 
       case 'moveObject':
@@ -485,11 +603,14 @@ async function executeTool(
       }
 
       // ── Compound tools ────────────────────────────────────────────────────
+      case 'createBulkObjects':
+        return await executeCreateBulkObjects(supabase, boardId, input, objectsForPlacement, viewportBounds)
+
       case 'createQuadrant':
-        return await executeCreateQuadrant(supabase, boardId, input)
+        return await executeCreateQuadrant(supabase, boardId, input, objectsForPlacement, viewportBounds)
 
       case 'createColumnLayout':
-        return await executeCreateColumnLayout(supabase, boardId, input)
+        return await executeCreateColumnLayout(supabase, boardId, input, objectsForPlacement, viewportBounds)
 
       case 'clearBoard': {
         const { error } = await supabase.from(TABLE).delete().eq('board_id', boardId)
@@ -502,7 +623,41 @@ async function executeTool(
     }
   } catch (e) {
     console.error(`executeTool error [${name}]`, e)
-    return `Error: ${e instanceof Error ? e.message : String(e)}`
+    return { content: `Error: ${e instanceof Error ? e.message : String(e)}` }
+  }
+}
+
+// ── User-facing summary (strips internal IDs from tool results) ─────────────
+// Raw tool results keep UUIDs so Claude can reference objects in multi-turn.
+// This function produces clean text for the final response shown to the user.
+function getFriendlySummary(
+  toolName: string,
+  input: Record<string, unknown>,
+  rawResult: string
+): string {
+  switch (toolName) {
+    case 'createStickyNote':
+      return input.text ? `Added sticky note: "${input.text}"` : 'Sticky note added'
+    case 'createShape': {
+      const t = String(input.type ?? 'shape')
+      return `${t.charAt(0).toUpperCase() + t.slice(1)} created`
+    }
+    case 'createFrame':
+      return input.title ? `Frame "${input.title}" created` : 'Frame created'
+    case 'createText':
+      return input.text ? `Text added: "${input.text}"` : 'Text added'
+    case 'createConnector':
+      return 'Connector added'
+    // Compound tools already return clean summaries
+    case 'createBulkObjects':
+    case 'createQuadrant':
+    case 'createColumnLayout':
+    case 'clearBoard':
+    case 'arrangeInGrid':
+      return rawResult
+    default:
+      // Strip anything that looks like a raw UUID to avoid leaking internals
+      return rawResult.replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, '').trim()
   }
 }
 
@@ -532,27 +687,33 @@ Deno.serve(async (req) => {
     return Response.json({ error: 'ANTHROPIC_API_KEY not configured' }, { status: 500, headers: corsHeaders })
   }
 
-  let body: { userMessage: string; currentObjects: BoardObject[]; boardId: string }
+  let body: { userMessage: string; currentObjects: BoardObject[]; boardId: string; viewport?: { bounds: { x: number; y: number; width: number; height: number } }; boardStateForPlacementOnly?: boolean }
   try {
     body = await req.json()
   } catch {
     return Response.json({ error: 'Invalid JSON body' }, { status: 400, headers: corsHeaders })
   }
 
-  const { userMessage, currentObjects, boardId } = body
+  const { userMessage, currentObjects, boardId, viewport, boardStateForPlacementOnly } = body
   if (!userMessage || !boardId) {
     return Response.json({ error: 'userMessage and boardId required' }, { status: 400, headers: corsHeaders })
   }
+  const viewportBounds = viewport?.bounds && typeof viewport.bounds.x === 'number' && typeof viewport.bounds.y === 'number' && typeof viewport.bounds.width === 'number' && typeof viewport.bounds.height === 'number'
+    ? viewport.bounds
+    : null
 
   const policy = getPolicyForMessage(userMessage)
   const modelForRequest = policy.modelTier === 'fast' ? SIMPLE_MODEL : COMPLEX_MODEL
   const toolsForRequest = policy.allowGetBoardState ? TOOLS : TOOLS.filter((t) => t.name !== 'getBoardState')
 
-  const boardStateJson = JSON.stringify(currentObjects ?? [])
+  // When boardStateForPlacementOnly is true (e.g. bulk create), use minimal board state in the prompt to avoid tokens/latency; placement still uses full currentObjects.
+  const objectsForPrompt = boardStateForPlacementOnly ? [] : (currentObjects ?? [])
+  const boardStateJson = JSON.stringify(objectsForPrompt)
   const messages: { role: string; content: string | unknown[] }[] = [
     { role: 'user', content: `Current board state:\n${boardStateJson}\n\nUser request: ${userMessage}` },
   ]
 
+  let lastCreatedCenter: { x: number; y: number } | null = null
   for (let turn = 0; turn < policy.maxTurns; turn++) {
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -590,7 +751,7 @@ Deno.serve(async (req) => {
 
     if (toolUseBlocks.length === 0) {
       return Response.json(
-        { text: textParts.join('\n').trim() || 'Done.' },
+        { text: textParts.join('\n').trim() || 'Done.', ...(lastCreatedCenter ? { createdCenter: lastCreatedCenter } : {}) },
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
@@ -602,14 +763,32 @@ Deno.serve(async (req) => {
       content: '',
     }))
 
+    // Fresh DB state for placement so bulk/single create avoid overlap with current board
+    const { data: placementRows } = await supabase.from(TABLE).select('id,x,y,width,height').eq('board_id', boardId).limit(201)
+    const placementObjects = (placementRows ?? []).slice(0, 200).map((r: { id: string; x: number; y: number; width?: number; height?: number }) => ({
+      id: r.id,
+      x: r.x,
+      y: r.y,
+      width: r.width ?? 0,
+      height: r.height ?? 0,
+    }))
+
     for (let i = 0; i < toolUseBlocks.length; i++) {
-      toolResults[i].content = await executeTool(supabase, boardId, toolUseBlocks[i].name, (toolUseBlocks[i].input as Record<string, unknown>) ?? {})
+      const result = await executeTool(supabase, boardId, toolUseBlocks[i].name, (toolUseBlocks[i].input as Record<string, unknown>) ?? {}, placementObjects, viewportBounds)
+      const content = typeof result === 'object' ? result.content : result
+      const createdCenter = typeof result === 'object' ? result.createdCenter : undefined
+      toolResults[i].content = content
+      if (createdCenter) lastCreatedCenter = createdCenter
     }
 
     if (policy.returnAfterToolExecution) {
-      const summary = toolResults.map((tr) => tr.content).filter(Boolean).join('\n').trim()
+      const summary = toolUseBlocks
+        .map((tb, i) => getFriendlySummary(tb.name, tb.input as Record<string, unknown>, toolResults[i].content))
+        .filter(Boolean)
+        .join('\n')
+        .trim()
       return Response.json(
-        { text: summary || 'Done.' },
+        { text: summary || 'Done.', ...(lastCreatedCenter ? { createdCenter: lastCreatedCenter } : {}) },
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
@@ -618,7 +797,7 @@ Deno.serve(async (req) => {
   }
 
   return Response.json(
-    { text: 'Reached max tool turns.', error: 'Max turns exceeded' },
+    { text: 'Reached max tool turns.', error: 'Max turns exceeded', ...(lastCreatedCenter ? { createdCenter: lastCreatedCenter } : {}) },
     { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   )
 })

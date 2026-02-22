@@ -20,6 +20,7 @@ export function setMyCursor(
   uid: string,
   payload: CursorPayload
 ) {
+  if (process.env.NODE_ENV !== 'test') console.log('LATENCY_CURSOR_SEND', Date.now())
   requireSupabase()
     .from(TABLE)
     .upsert(
@@ -109,7 +110,10 @@ export function subscribeCursors(
     .on(
       'postgres_changes',
       { event: '*', schema: 'public', table: TABLE, filter: `board_id=eq.${boardId}` },
-      () => fetchAndNotify()
+      () => {
+        if (process.env.NODE_ENV !== 'test') console.log('LATENCY_CURSOR_RECEIVE', Date.now())
+        fetchAndNotify()
+      }
     )
     .subscribe((status, err) => {
       if (status !== 'SUBSCRIBED') {

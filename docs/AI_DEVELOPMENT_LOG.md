@@ -21,7 +21,7 @@
 | **Edge Function** | `supabase/functions/ai-command/index.ts`: Validates JWT, reads `userMessage`, `currentObjects`, `boardId`; calls `getPolicyForMessage(userMessage)` from `policy.ts`; builds tool list; single model per request (Haiku or Sonnet); runs Claude loop with sequential tool execution; compound tool handlers execute all Supabase inserts server-side; returns `{ text }` or error. |
 | **Edge policy** | `supabase/functions/ai-command/policy.ts`: `getPolicyForMessage(userMessage)` → `AiPolicy`: `modelTier` ('fast'\|'smart'), `maxTurns`, `maxTokens`, `allowGetBoardState`, `forcedToolName`, `returnAfterToolExecution`. Three tiers: simple creation → fast/Haiku; compound templates → smart/Sonnet, 1 turn, forced tool; ops/complex → smart/Sonnet, 3–8 turns, getBoardState allowed. |
 
-**Tools (edge):** `getBoardState`, `createStickyNote`, `createShape`, `createFrame`, `createConnector`, `createText`, `moveObject`, `resizeObject`, `rotateObject`, `updateText`, `changeColor`, `deleteObject`, `arrangeInGrid`, **`createQuadrant`**, **`createColumnLayout`**, **`clearBoard`**.
+**Tools (edge):** `getBoardState`, `createStickyNote`, `createShape`, `createFrame`, `createConnector`, `createText`, `moveObject`, `resizeObject`, `rotateObject`, `updateText`, `changeColor`, `deleteObject`, `arrangeInGrid`, **`createQuadrant`**, **`createColumnLayout`**, **`clearBoard`**, **`createBulkObjects`**.
 
 **Models:** Simple path → `claude-haiku-4-5-20251001` (env `ANTHROPIC_MODEL_SIMPLE`); compound + complex path → `claude-sonnet-4-20250514` (env `ANTHROPIC_MODEL_COMPLEX`).
 
@@ -104,7 +104,44 @@
   - "If the inline board state is empty but the command operates on existing objects, call `getBoardState` first."
   - "When size or position is not specified, make a reasonable choice."
 
-### 3.11 Client payload regex fixes (shipped)
+### 3.12 Bulk creation — `createBulkObjects` compound tool (shipped)
+
+- **Problem:** Asking the AI to "create 50 sticky notes" (or any bulk creation of any object type) would hit the Anthropic 30,000 input-token-per-minute rate limit. Root causes were two-fold:
+  1. All creation commands matched `isCreationCommand` in `claudeAgent.ts`, so the full board state (potentially thousands of tokens) was sent even when unnecessary.
+  2. `forcedToolName: 'createStickyNote'` (singular tool) meant Claude created 1 object and stopped. The user would retry, each retry a fresh full LLM call — multiple rapid retries together exceeded the per-minute token cap.
+- **Approach:** Same compound tool pattern as `createQuadrant`/`createColumnLayout`. Claude provides intent (objectType, count, optional items/topic/layout); the Edge Function computes all coordinates and executes a **single batch `supabase.from(TABLE).insert([...rows])`** — one DB round-trip regardless of N.
+- **New tool `createBulkObjects`:** Covers all object types (sticky, rect, circle, frame, text). Accepts `count` (max 500), `items` (optional text per object), `topic` (auto-labels as "topic 1", "topic 2"), `color`, `layout` (grid or scattered), `startX/Y`. Grid layout uses `columns = ceil(sqrt(count))` to produce a square-ish arrangement.
+- **Policy:** New `BULK_QUANTITY_RE` + `BULK_OBJECT_TYPE_RE` detects bulk intent (digit ≥ 3 or number word + object type word). Checked **before** the simple creation branch so "create 50 stickies" never falls into the singular forced-tool path. Routes to Haiku, 1 turn, no board state, `returnAfterToolExecution: true`.
+- **Board state stripping:** `isBulkCreation` flag in `claudeAgent.ts` sets `objectsToSend = []` for bulk commands only. All other creation paths (including "create a sticky next to the blue frame") still send board state — the strip is scoped precisely to the bulk path.
+- **Plural handling:** `BULK_OBJECT_TYPE_RE` uses `rectangles?`, `circles?`, `squares?` etc. to match both singular and plural object type words.
+- **Result (measured):**
+
+| Request | Time | Objects created | LLM calls | Input tokens |
+|---|---|---|---|---|
+| Add 20 rectangles | 1.28s | 20 | 1 | ~2,390 |
+| Create 50 sticky notes | 2.47s | 50 | 1 | ~2,400 |
+| Create 500 sticky notes | 1.50s | 500 | 1 | ~2,400 |
+
+500 objects in 1.50s with a single batch insert — zero rate-limit risk (~12 bulk requests/minute headroom at 30k token cap).
+
+### 3.13 Clean user-facing response text — `getFriendlySummary` (shipped)
+
+- **Problem:** The `returnAfterToolExecution` path joined raw tool result strings directly into the response shown to users: "Created rect with id edaf3133-79c0-476d-a227-a7fd264c6c3f Created rect with id c0eaa2dd-..." — internal UUIDs leaking into the UI.
+- **Root cause:** Tool handlers return UUID-bearing strings (e.g. `"Created sticky note with id ${id}"`) so Claude can reference objects by ID in subsequent multi-turn steps. This is correct for multi-turn paths but wrong for the final user-facing response.
+- **Fix:** Added `getFriendlySummary(toolName, input, rawResult)` helper in `index.ts`. Called only in the `returnAfterToolExecution` branch — the raw UUID strings are still used as tool results passed back to Claude in multi-turn paths. Clean messages:
+  - `createStickyNote` → `Added sticky note: "your text here"`
+  - `createShape` → `Rect created` / `Circle created`
+  - `createFrame` → `Frame "Sprint" created`
+  - `createText` → `Text added: "..."`
+  - Compound tools → pass through their already-clean summary strings
+  - Default fallback → UUID regex strip on any unhandled tool
+
+### 3.14 Board query commands — `isQueryCommand` (shipped)
+
+- **Problem:** After creating 500 sticky notes, asking "How many objects are there in the board?" returned "0 objects — the board is currently empty." The query matched none of the client routing regexes (`isCreationCommand`, `isObjectRefCommand`, `isComplexCommand`), so `objectsToSend = []`. Claude trusted the empty inline board state and answered without calling `getBoardState`.
+- **Fix (Part 1 — client):** Added `isQueryCommand` in `claudeAgent.ts`: matches when message contains a query-intent word (`how many`, `count`, `list`, `what`, `describe`, `show me`, `tell me`) AND an object-type word (`objects?`, `sticky`, `frame`, `board`, `canvas`, etc.). When matched, `objectsToSend = currentObjects` — board state is sent so Claude has real data or recognises a mismatch and calls `getBoardState`.
+- **Fix (Part 2 — system prompt):** Added safety-net rule: "If the user is asking about existing objects (counting, listing, describing) and the inline board state is empty, always call `getBoardState` first before answering." Handles cases where the client regex misses a query variant.
+- **Result:** "How many objects are there in the board?" with 500 objects on canvas → correct count answer in 5.73s (includes `getBoardState` round-trip; `BOARD_STATE_OBJECT_CAP` returns frame summary only for large boards).
 
 - **Problem:** Commands like "space elements evenly" weren't sending `currentObjects` to the edge function because "space" wasn't in the client's `isComplexCommand` regex. Claude received `"Current board state: []"` and concluded the board was empty.
 - **Fix:** Added `space|align|distribute|kanban` to `isComplexCommand`; broadened `isObjectRefCommand` to capture `resize|rotate|rename|change|update|color`. Both ensure the full board state is included in the request for any command that needs to operate on existing objects.
@@ -115,14 +152,18 @@
 
 | Command type | Model | Turns | getBoardState | Return after tools | Typical latency |
 |--------------|-------|--------|----------------|--------------------|-----------------|
-| Simple (add sticky, add shape, add frame, add text) | Haiku | 1 | No | Yes | ~1.7–2s |
+| Simple (add 1 sticky, shape, frame, text) | Haiku | 1 | No | Yes | ~1.5–2s |
+| **Bulk (create N objects of same type, N ≥ 3)** | **Haiku** | **1** | **No** | **Yes** | **~1.3–2.5s** |
 | Compound (SWOT, retro, journey map, kanban, clear board) | Sonnet | 1 | No | Yes | ~2–3s |
 | Ops (move, resize, change color, delete specific, rotate) | Sonnet | 3 | Yes | No | ~3–5s |
+| Query (how many, list, describe, count) | Sonnet | 8 | Yes | No | ~4–6s |
 | Generic complex (arrange, connect, multi-step) | Sonnet | 8 | Yes | No | ~5–10s |
 
 - **Simple:** Haiku, single-turn, no board state, return immediately after tool. Target &lt;2s met.
+- **Bulk:** Haiku forced to `createBulkObjects`; all N objects computed and batch-inserted server-side in one DB call. ~2,390 input tokens regardless of N. Tested to 500 objects in 1.50s.
 - **Compound:** Sonnet forced to one compound tool; all DB operations done server-side. ~2–3s regardless of template complexity.
 - **Ops:** Sonnet with board state access; 3-turn cap prevents over-running on simple mutations.
+- **Query:** Sonnet with board state; `BOARD_STATE_OBJECT_CAP` truncates to frames-only summary for large boards.
 - **Generic complex:** Full multi-turn for arrange/connect/multi-step; correctness over speed.
 
 ---
@@ -134,7 +175,7 @@
 | **Cursor (+ Claude Sonnet)** | Primary IDE throughout. Used for all code generation, refactoring, and debugging. Agent mode used for multi-file changes (e.g. policy + index + tests in one session). Plan mode used before large changes (compound tool architecture, ops path reclassification) to reason through implications before touching code. |
 | **Claude (Sonnet via Cursor)** | Generated edge function logic, policy classification, system prompt iterations, compound tool layout math, and all test files. Served as both implementation agent and architecture consultant for the compound tool approach. |
 | **Supabase Edge Functions (Deno)** | AI proxy backend: validated JWT, called Anthropic API, executed all tool handlers (Supabase inserts/updates/deletes). Deployed via `supabase functions deploy`. |
-| **Vitest + Testing Library** | TDD workflow: tests written first for policy classification (`aiEdgePolicy.test.ts`, `aiCommandPolicy.test.ts`), then implementation. 100 tests across 10 files; run before every deploy. |
+| **Vitest + Testing Library** | TDD workflow: tests written first for policy classification (`aiEdgePolicy.test.ts`, `aiCommandPolicy.test.ts`), then implementation. 130 tests across 11 files (added `claudeAgent.test.ts` for board-state routing logic); run before every deploy. |
 | **Supabase Realtime** | All board object changes (AI-generated or user-made) sync instantly to all connected clients via Postgres row subscriptions — no extra broadcasting code needed. |
 
 **Workflow pattern:** Every significant change followed: plan → write failing tests → implement → green tests → deploy edge function → live test in browser.
@@ -223,12 +264,17 @@ These are prompts used **during development** (in Cursor) that produced the most
 - **Client-edge regex parity:** The client's `claudeAgent.ts` regex for deciding which board objects to send must stay in sync with the edge policy classification. A mismatch (missing "space" from `isComplexCommand`) caused board state to be sent as `[]`, making Claude think the board was empty.
 - **Context is everything:** AI output quality is directly proportional to how precisely the relevant constraints (renderer coordinate system, DB schema, existing architecture) are included in the prompt. Generic prompts produced generic code; precise context produced correct code on the first attempt.
 - **TDD as a forcing function:** Writing tests before implementation forced explicit reasoning about every policy case and field value. Tests also caught regressions when policy tiers were reorganized — without them, the ops reclassification would have silently broken existing behavior.
+- **Rate limits are throughput caps, not spend caps:** The 30k input-token-per-minute limit is hit not by one expensive call but by many cheap retries. The root fix is ensuring the correct number of objects is created on the first call — eliminating retries eliminates the token pileup.
+- **Batch insert is mandatory for bulk operations:** Sequential `await insert()` in a loop would have timed out the Edge Function at ~100+ objects (10s limit). A single `insert([...rows])` handles 500 objects in the same time as 1 insert, making the operation latency-independent of object count.
+- **Scope board state stripping precisely:** Stripping `currentObjects` for all creation commands would break "create a sticky next to the blue frame" (needs board state). The `isBulkCreation` flag gates the strip to only the bulk path — every other creation path is untouched.
+- **Deploy is a hidden step:** Client-side changes (TypeScript, policy mirrors) are immediately live in the browser. Edge Function changes require an explicit `supabase functions deploy` — forgetting this causes confusion where old server behavior persists despite correct-looking local code.
+- **Regex plural handling matters:** `\brectangle\b` does not match "rectangles" — the word boundary fails because `s` follows. Using `rectangles?` (or explicit plural variants) is required for object-type regexes to work on natural language input.
 
 ---
 
 ## 11. References
 
-- `docs/requirements.md` — G4 AI command and latency targets.
+- G4 AI command and latency targets (from project brief).
 - `docs/AI_EDGE_FUNCTION.md` — Edge function setup, secrets, auth.
 - `docs/CollabBoard-48hr-Final-PRD.md` — Tool schema, system prompt, templates, dev log template.
 - `docs/presearch.md` — Stack choices, Claude, &lt;2s target.

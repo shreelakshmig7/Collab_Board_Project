@@ -66,4 +66,4 @@ Without this, the other user’s cursor won’t appear and their object moves wo
 
 ## 5. Live URL
 
-After deploy, your app is at the Vercel URL. Add it to the README **Live app** section and to `docs/requirements.md` once the MVP checklist is verified.
+After deploy, your app is at the Vercel URL. Add it to the README **Live app** section once the MVP checklist is verified.

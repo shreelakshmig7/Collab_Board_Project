@@ -127,4 +127,51 @@ describe('ai-command edge policy', () => {
     expect(p.modelTier).toBe('smart')
     expect(p.maxTurns).toBeGreaterThan(1)
   })
+
+  // ── Bulk creation path ────────────────────────────────────────────────────
+  it('routes "create 50 sticky notes" to bulk: fast, 1 turn, createBulkObjects, no board state', () => {
+    const p = getPolicyForMessage('Create 50 sticky notes')
+    expect(p.forcedToolName).toBe('createBulkObjects')
+    expect(p.modelTier).toBe('fast')
+    expect(p.maxTurns).toBe(1)
+    expect(p.allowGetBoardState).toBe(false)
+    expect(p.returnAfterToolExecution).toBe(true)
+  })
+
+  it('routes "add 20 rectangles" to bulk', () => {
+    const p = getPolicyForMessage('Add 20 rectangles')
+    expect(p.forcedToolName).toBe('createBulkObjects')
+    expect(p.allowGetBoardState).toBe(false)
+  })
+
+  it('routes "create a dozen frames" to bulk', () => {
+    const p = getPolicyForMessage('Create a dozen frames')
+    expect(p.forcedToolName).toBe('createBulkObjects')
+  })
+
+  it('routes "make several circles" to bulk', () => {
+    const p = getPolicyForMessage('Make several circles')
+    expect(p.forcedToolName).toBe('createBulkObjects')
+  })
+
+  it('routes "add 100 text labels" to bulk', () => {
+    const p = getPolicyForMessage('Add 100 text labels')
+    expect(p.forcedToolName).toBe('createBulkObjects')
+  })
+
+  it('does NOT route single-object creation to bulk', () => {
+    const p = getPolicyForMessage('Create a sticky note')
+    expect(p.forcedToolName).toBe('createStickyNote')
+    expect(p.forcedToolName).not.toBe('createBulkObjects')
+  })
+
+  it('does NOT route "create 2 stickies" to bulk (below threshold)', () => {
+    const p = getPolicyForMessage('Create 2 stickies')
+    expect(p.forcedToolName).not.toBe('createBulkObjects')
+  })
+
+  it('does NOT route contextual creation to bulk — "create a sticky next to the blue frame"', () => {
+    const p = getPolicyForMessage('Create a sticky note next to the blue frame')
+    expect(p.forcedToolName).not.toBe('createBulkObjects')
+  })
 })

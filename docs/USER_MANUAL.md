@@ -632,7 +632,7 @@ The AI can plan and execute **multi-step workflows** that create structured temp
 
 | Metric | Target / Limit |
 |---|---|
-| Canvas frame rate | 60 FPS during pan, zoom, and object manipulation |
+| Canvas frame rate | 60 FPS during pan and object manipulation |
 | Object sync latency | < 100 ms |
 | Cursor sync latency | < 50 ms |
 | Object capacity | 500+ objects without performance degradation |

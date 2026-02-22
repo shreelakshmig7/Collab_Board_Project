@@ -13,23 +13,35 @@ function requireSupabase() {
   return supabase
 }
 
+/** Returns true for expected network-unavailable errors that should be silently ignored. */
+function isNetworkError(error: { message?: string } | null | undefined): boolean {
+  const msg = error?.message ?? ''
+  return (
+    msg.includes('Failed to fetch') ||
+    msg.includes('NetworkError') ||
+    msg.includes('Network request failed') ||
+    msg.includes('Load failed')
+  )
+}
+
 /** Mark current user as online (call on login and on heartbeat). Returns a promise so callers can await before subscribing. */
 export function upsertPresence(userId: string, displayName: string | null): Promise<void> {
-  return Promise.resolve(
-    requireSupabase()
-      .from(TABLE)
-      .upsert(
-        {
-          user_id: userId,
-          display_name: displayName,
-          last_seen_at: new Date().toISOString(),
-        },
-        { onConflict: 'user_id' }
-      )
-      .then(({ error }) => {
-        if (error) console.error('upsertPresence', error)
-      })
-  )
+  return requireSupabase()
+    .from(TABLE)
+    .upsert(
+      {
+        user_id: userId,
+        display_name: displayName,
+        last_seen_at: new Date().toISOString(),
+      },
+      { onConflict: 'user_id' }
+    )
+    .then(({ error }) => {
+      if (error && !isNetworkError(error)) console.error('upsertPresence', error)
+    })
+    .catch(() => {
+      // Network unavailable — silently skip
+    })
 }
 
 /** Remove current user from presence (call on logout / beforeunload). Returns a promise so callers can await before signOut. */
@@ -38,7 +50,7 @@ export async function removePresence(userId: string): Promise<void> {
     .from(TABLE)
     .delete()
     .eq('user_id', userId)
-  if (error) console.error('removePresence', error)
+  if (error && !isNetworkError(error)) console.error('removePresence', error)
 }
 
 /** Subscribe to the list of online users. Callback receives all rows in presence (show on login, remove on logout); call removePresence on cleanup. */
@@ -47,21 +59,28 @@ export function subscribePresence(
 ): () => void {
   const db = requireSupabase()
   const fetchAndNotify = async () => {
-    const staleThreshold = new Date(Date.now() - PRESENCE_TIMEOUT_MS).toISOString()
-    const { data, error } = await db
-      .from(TABLE)
-      .select('user_id, display_name')
-      .gte('last_seen_at', staleThreshold)
-    if (error) {
-      console.error('subscribePresence error', error)
-      callback([])
-      return
+    try {
+      const staleThreshold = new Date(Date.now() - PRESENCE_TIMEOUT_MS).toISOString()
+      const { data, error } = await db
+        .from(TABLE)
+        .select('user_id, display_name')
+        .gte('last_seen_at', staleThreshold)
+      if (error) {
+        if (!isNetworkError(error)) {
+          console.error('subscribePresence error', error)
+          callback([])
+        }
+        // Network error: silently skip — presence will resume once back online
+        return
+      }
+      const users: PresenceUser[] = (data ?? []).map((row) => ({
+        uid: String(row.user_id),
+        displayName: row.display_name != null ? String(row.display_name) : null,
+      }))
+      callback(users)
+    } catch {
+      // Unexpected throw — silently skip, will retry on next poll
     }
-    const users: PresenceUser[] = (data ?? []).map((row) => ({
-      uid: String(row.user_id),
-      displayName: row.display_name != null ? String(row.display_name) : null,
-    }))
-    callback(users)
   }
   fetchAndNotify()
   const channel = db

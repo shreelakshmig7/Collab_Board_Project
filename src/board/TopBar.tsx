@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
 import { signOut } from '../supabase/auth'
 
+type ConnectionStatus = 'online' | 'offline' | 'reconnected'
+
 type TopBarProps = {
   presenceNames: string[]
   onSignOut?: () => void
@@ -16,7 +18,9 @@ type TopBarProps = {
 export default function TopBar({ presenceNames, onSignOut, boardTitle, onBackToBoards, onClearBoard, isShared = false, onShareClick }: TopBarProps) {
   const [showPresenceDropdown, setShowPresenceDropdown] = useState(false)
   const [showClearModal, setShowClearModal] = useState(false)
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('online')
   const presenceRef = useRef<HTMLDivElement>(null)
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const count = presenceNames.length
   const label = `Online (${count})`
@@ -32,6 +36,24 @@ export default function TopBar({ presenceNames, onSignOut, boardTitle, onBackToB
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
+
+  useEffect(() => {
+    const handleOffline = () => {
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current)
+      setConnectionStatus('offline')
+    }
+    const handleOnline = () => {
+      setConnectionStatus('reconnected')
+      reconnectTimerRef.current = setTimeout(() => setConnectionStatus('online'), 3000)
+    }
+    window.addEventListener('offline', handleOffline)
+    window.addEventListener('online', handleOnline)
+    return () => {
+      window.removeEventListener('offline', handleOffline)
+      window.removeEventListener('online', handleOnline)
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current)
+    }
   }, [])
 
   return (
@@ -135,6 +157,30 @@ export default function TopBar({ presenceNames, onSignOut, boardTitle, onBackToB
         </button>
       </div>
     </header>
+
+      {connectionStatus !== 'online' && (
+        <div
+          role="status"
+          aria-live="polite"
+          className={`fixed top-[57px] left-0 right-0 z-[99] flex items-center justify-center gap-2 py-2 text-sm font-medium transition-all ${
+            connectionStatus === 'offline'
+              ? 'bg-red-500 text-white'
+              : 'bg-green-500 text-white'
+          }`}
+        >
+          {connectionStatus === 'offline' ? (
+            <>
+              <span aria-hidden>⚠️</span>
+              You&apos;re offline — changes won&apos;t sync until you reconnect.
+            </>
+          ) : (
+            <>
+              <span aria-hidden>✓</span>
+              Back online — syncing…
+            </>
+          )}
+        </div>
+      )}
 
       {showClearModal && (
         <div

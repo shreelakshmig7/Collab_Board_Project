@@ -94,6 +94,7 @@ export function subscribeObjects(
         if (onRealtimeChange && payload && typeof payload === 'object') {
           const ev = (payload.eventType ?? '').toUpperCase()
           if ((ev === 'INSERT' || ev === 'UPDATE') && payload.new && payload.new.id != null) {
+            if (process.env.NODE_ENV !== 'test') console.log('LATENCY_OBJECT_RECEIVE', Date.now())
             change = { event: ev as 'INSERT' | 'UPDATE', new: rowToBoardObject(payload.new) }
             onRealtimeChange(change)
           } else if (ev === 'DELETE' && payload.old && payload.old.id != null) {
@@ -127,6 +128,7 @@ export async function getObjects(boardId: string): Promise<BoardObject[]> {
 }
 
 export async function addObject(boardId: string, obj: BoardObject): Promise<void> {
+  if (process.env.NODE_ENV !== 'test') console.log('LATENCY_OBJECT_SEND', Date.now())
   const { error } = await requireSupabase().from(TABLE).insert({
     board_id: boardId,
     id: obj.id,
@@ -164,6 +166,7 @@ export async function updateObject(
   id: string,
   partial: Partial<BoardObject> | ClearConnectorOverridesPayload
 ): Promise<void> {
+  if (process.env.NODE_ENV !== 'test') console.log('LATENCY_OBJECT_SEND', Date.now())
   const row: Record<string, unknown> = { updated_at: new Date().toISOString() }
   const p = partial as Partial<BoardObject>
   if (p.x !== undefined) row.x = p.x

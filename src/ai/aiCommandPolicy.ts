@@ -17,6 +17,10 @@ const CLEAR_RE = /\b(clear|wipe|reset|start\s+fresh|delete\s+all|remove\s+all|er
 const QUADRANT_RE = /\b(swot|quadrant|2x2|four[\s-]quadrant|matrix\s+diagram)\b/i
 const COLUMN_RE = /\b(retro|retrospective|kanban|user[\s-]journey|journey[\s-]map|column[\s-]layout)\b/i
 
+// Bulk creation classifiers — sync with supabase/functions/ai-command/policy.ts
+const BULK_QUANTITY_RE = /\b([3-9]|\d{2,}|ten|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|dozen|several|many|multiple|bunch)\b/i
+const BULK_OBJECT_TYPE_RE = /\b(sticky|stickies|note|notes|rect|rectangles?|squares?|circles?|shape|shapes|frame|frames|text)\b/i
+
 const STICKY_RE = /\b(sticky|sticky-note|post-it)\b/i
 const FRAME_RE = /\bframe\b/i
 const TEXT_RE = /\btext\b/i
@@ -40,6 +44,12 @@ export const getAiCommandPolicy = (userMessage: string): AiCommandPolicy => {
 
   if (COLUMN_RE.test(msg)) {
     return { mode: 'compound', maxTurns: 1, maxTokens: 1024, allowGetBoardState: false, forcedToolName: 'createColumnLayout' }
+  }
+
+  // Bulk creation: 3+ objects of the same type — server batch-inserts all in one call.
+  const isBulk = CREATION_RE.test(msg) && BULK_QUANTITY_RE.test(msg) && BULK_OBJECT_TYPE_RE.test(msg)
+  if (isBulk) {
+    return { mode: 'compound', maxTurns: 1, maxTokens: 1024, allowGetBoardState: false, forcedToolName: 'createBulkObjects' }
   }
 
   const looksComplex =

@@ -32,6 +32,23 @@ import {
   TEXT_DEFAULT_FONT_SIZE,
 } from '../constants'
 import { validateAIPrompt, sanitizeAIPrompt, validateObjectText, sanitizeObjectText } from '../utils/inputValidation'
+import { doesRectOverlapAny, findEmptyPositionInViewport, findEmptyPositionOutsideCluster } from '../canvas/placementUtils'
+
+const AI_CONNECTION_ERROR_MSG = 'Connection error — please try again.'
+
+/** Normalize AI chat content to a display string. Never returns "[object Object]". */
+function normalizeAiMessageContent(content: unknown): string {
+  if (typeof content === 'string') {
+    return content === '[object Object]' || content.includes('[object Object]')
+      ? AI_CONNECTION_ERROR_MSG
+      : content
+  }
+  if (content !== null && typeof content === 'object' && 'message' in content) {
+    return normalizeAiMessageContent((content as { message: unknown }).message)
+  }
+  const s = String(content)
+  return s === '[object Object]' || s.includes('[object Object]') ? AI_CONNECTION_ERROR_MSG : s
+}
 
 function GeminiIcon({ className }: { className?: string }) {
   return (
@@ -72,6 +89,8 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
   const dragStartPositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map())
   // Viewport center (from Canvas) for creating objects when toolbar button is clicked
   const viewportCenterRef = useRef({ x: 250, y: 200 })
+  const viewportBoundsRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null)
+  const [panToWorldPosition, setPanToWorldPosition] = useState<{ x: number; y: number } | null>(null)
   const aiChatScrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -703,6 +722,30 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
       } else {
         newObj = { id, type: 'text', x, y, width: 200, height: 80, text: '', font_size: TEXT_DEFAULT_FONT_SIZE, font_color: DEFAULT_TEXT_COLOR }
       }
+      const boundedObjects = objects
+        .filter((o) => o.width > 0 && o.height > 0)
+        .map((o) => ({ id: o.id, x: o.x, y: o.y, width: o.width, height: o.height }))
+      const newObjRect = { x: newObj.x, y: newObj.y, width: newObj.width, height: newObj.height }
+      let didReposition = false
+      if (doesRectOverlapAny(newObjRect, boundedObjects, 2)) {
+        const bounds = viewportBoundsRef.current
+        const empty =
+          bounds && bounds.width > 0 && bounds.height > 0
+            ? findEmptyPositionInViewport(
+                { width: newObj.width, height: newObj.height },
+                boundedObjects,
+                bounds
+              )
+            : null
+        const finalEmpty =
+          empty ?? findEmptyPositionOutsideCluster(
+            { width: newObj.width, height: newObj.height },
+            boundedObjects
+          )
+        newObj.x = finalEmpty.x
+        newObj.y = finalEmpty.y
+        didReposition = true
+      }
       if (newObj.type !== 'frame') {
         const cx = newObj.x + newObj.width / 2
         const cy = newObj.y + newObj.height / 2
@@ -720,6 +763,9 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
       setCreateError(null)
       setSelectedIds([id])
       setActiveTool(null)
+      if (didReposition) {
+        setPanToWorldPosition({ x: newObj.x, y: newObj.y })
+      }
       addObject(boardId, newObj).catch((err: unknown) => {
         console.error('Failed to create object', err)
         setObjects((prev) => prev.filter((o) => o.id !== id))
@@ -742,6 +788,22 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
     aiChatScrollRef.current?.scrollTo({ top: aiChatScrollRef.current.scrollHeight, behavior: 'smooth' })
   }, [aiChatMessages, aiLoading])
 
+  // Auto-remove error messages when back online (clears stale offline errors)
+  useEffect(() => {
+    const handleOnline = () => {
+      setAiChatMessages((prev) =>
+        prev.filter((msg) => {
+          if (msg.isError) return false
+          if (normalizeAiMessageContent(msg.content) === AI_CONNECTION_ERROR_MSG) return false
+          return true
+        })
+      )
+      setCreateError(null)
+    }
+    window.addEventListener('online', handleOnline)
+    return () => window.removeEventListener('online', handleOnline)
+  }, [])
+
   const handleRunAI = useCallback(async () => {
     const prompt = sanitizeAIPrompt(aiPrompt)
     const result = validateAIPrompt(prompt)
@@ -754,15 +816,30 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
     setAiLoading(true)
     setAiChatMessages((prev) => [...prev, { role: 'user', content: prompt }])
     try {
-      const result = await runAICommand(prompt, objects, boardId)
+      const viewport = viewportBoundsRef.current
+        ? { bounds: viewportBoundsRef.current }
+        : undefined
+      const result = await runAICommand(prompt, objects, boardId, viewport)
       if (result.error) {
-        setAiChatMessages((prev) => [...prev, { role: 'assistant', content: result.error!, isError: true }])
+        setAiChatMessages((prev) => [
+          ...prev,
+          { role: 'assistant', content: normalizeAiMessageContent(result.error), isError: true },
+        ])
       } else {
-        setAiChatMessages((prev) => [...prev, { role: 'assistant', content: result.text }])
+        setAiChatMessages((prev) => [
+          ...prev.filter((msg) => !msg.isError),
+          { role: 'assistant', content: result.text },
+        ])
+        if (result.createdCenter) {
+          const center = result.createdCenter
+          setTimeout(() => setPanToWorldPosition(center), 150)
+        }
       }
     } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err)
-      setAiChatMessages((prev) => [...prev, { role: 'assistant', content: errMsg, isError: true }])
+      setAiChatMessages((prev) => [
+        ...prev,
+        { role: 'assistant', content: normalizeAiMessageContent(err), isError: true },
+      ])
     } finally {
       setAiLoading(false)
     }
@@ -854,7 +931,12 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
           onConnectorCreated={handleConnectorCreated}
           onConnectorResized={handleConnectorResized}
           onConnectorMoved={handleConnectorMoved}
-          onViewportChange={(c) => { viewportCenterRef.current = c }}
+          onViewportChange={(viewport) => {
+            viewportCenterRef.current = viewport.center
+            viewportBoundsRef.current = viewport.bounds
+          }}
+          panToWorldPosition={panToWorldPosition}
+          onPannedToPosition={() => setPanToWorldPosition(null)}
           onSelectionDragStart={handleSelectionDragStart}
           onSelectionDragMove={handleSelectionDragMove}
           onSelectionDragEnd={handleSelectionDragEnd}
@@ -871,6 +953,18 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
           {/* Header */}
           <div className="flex items-center justify-between px-3 py-3 border-b border-gray-100">
             <span className="text-sm font-medium text-gray-800">AI Assistant</span>
+            <div className="flex items-center gap-1">
+              {aiChatMessages.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setAiChatMessages([])}
+                  className="px-2 py-1 text-xs rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700 cursor-pointer focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 focus:outline-none"
+                  aria-label="Clear chat history"
+                  title="Clear chat"
+                >
+                  Clear
+                </button>
+              )}
             <button
               type="button"
               onClick={() => {
@@ -884,6 +978,7 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
+            </div>
           </div>
           {/* Chat history */}
           <div ref={aiChatScrollRef} className="flex-1 min-h-0 overflow-y-auto px-3 py-3 flex flex-col gap-3">
@@ -904,7 +999,7 @@ export default function BoardPage({ user, boardId, boardName, presenceNames }: B
                         : 'bg-gray-100 text-gray-700'
                   }`}
                 >
-                  {msg.content}
+                  {normalizeAiMessageContent(msg.content)}
                 </div>
               </div>
             ))}

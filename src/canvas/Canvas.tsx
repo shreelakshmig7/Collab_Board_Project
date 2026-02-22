@@ -27,6 +27,7 @@ import {
 import { addObject } from '../supabase/objects'
 import type { BoardObject } from '../types/board'
 import { getObjectIdsInSelectionRect, applyMarqueeToSelection } from './selectionRect'
+import { doesRectOverlapAny, findEmptyPositionInViewport, findEmptyPositionOutsideCluster } from './placementUtils'
 import OtherCursors from './OtherCursors'
 import BoardObjects from './BoardObjects'
 
@@ -61,7 +62,10 @@ type CanvasProps = {
   connectorStyle?: import('../types/board').ConnectorStyle
   onConnectorResized?: (id: string, fromX: number, fromY: number, toX: number, toY: number) => void
   onConnectorMoved?: (id: string, fromX: number, fromY: number, toX: number, toY: number) => void
-  onViewportChange?: (center: { x: number; y: number }) => void
+  onViewportChange?: (viewport: { center: { x: number; y: number }; bounds: { x: number; y: number; width: number; height: number } }) => void
+  /** When set, canvas pans to center this world position (one-shot; parent clears via onPannedToPosition). */
+  panToWorldPosition?: { x: number; y: number } | null
+  onPannedToPosition?: () => void
   /** Drag whole selection from empty space inside selection box */
   onSelectionDragStart?: (worldPos: { x: number; y: number }) => void
   onSelectionDragMove?: (deltaX: number, deltaY: number) => void
@@ -103,6 +107,8 @@ export default function Canvas({
   onConnectorMoved,
   connectorStyle = 'arrow',
   onViewportChange,
+  panToWorldPosition = null,
+  onPannedToPosition,
   onSelectionDragStart,
   onSelectionDragMove,
   onSelectionDragEnd,
@@ -231,13 +237,34 @@ export default function Canvas({
     return () => ro.disconnect()
   }, [])
 
-  // Notify viewport center (for creating objects at center when toolbar button is clicked)
+  // Notify viewport center and bounds (for toolbar create and empty-space placement)
   useEffect(() => {
-    onViewportChange?.({
-      x: (-posRef.current.x + size.width / 2) / scaleRef.current,
-      y: (-posRef.current.y + size.height / 2) / scaleRef.current,
-    })
+    const scale = scaleRef.current
+    const center = {
+      x: (-posRef.current.x + size.width / 2) / scale,
+      y: (-posRef.current.y + size.height / 2) / scale,
+    }
+    const bounds = {
+      x: -posRef.current.x / scale,
+      y: -posRef.current.y / scale,
+      width: size.width / scale,
+      height: size.height / scale,
+    }
+    onViewportChange?.({ center, bounds })
   }, [size, stagePos, stageScale, onViewportChange])
+
+  // One-shot pan to world position (e.g. after toolbar create in empty space)
+  useEffect(() => {
+    if (panToWorldPosition == null) return
+    const scale = scaleRef.current
+    const newPos = {
+      x: size.width / 2 - panToWorldPosition.x * scale,
+      y: size.height / 2 - panToWorldPosition.y * scale,
+    }
+    posRef.current = newPos
+    setStagePos(newPos)
+    onPannedToPosition?.()
+  }, [panToWorldPosition, size, onPannedToPosition])
 
   // Update transformer: show resize/rotate handles for single selection (including connectors).
   useEffect(() => {
@@ -465,6 +492,46 @@ export default function Canvas({
         text: '', font_size: TEXT_DEFAULT_FONT_SIZE,
         font_color: DEFAULT_TEXT_COLOR,
       }
+    }
+
+    const OVERLAP_PADDING = 2
+    const boundedObjects = objects
+      .filter((o) => o.width > 0 && o.height > 0)
+      .map((o) => ({ id: o.id, x: o.x, y: o.y, width: o.width, height: o.height }))
+    const newObjRect = { x: newObj.x, y: newObj.y, width: newObj.width, height: newObj.height }
+    if (doesRectOverlapAny(newObjRect, boundedObjects, OVERLAP_PADDING)) {
+      const scale = scaleRef.current
+      const viewport = {
+        x: -posRef.current.x / scale,
+        y: -posRef.current.y / scale,
+        width: size.width / scale,
+        height: size.height / scale,
+      }
+      let empty =
+        findEmptyPositionInViewport(
+          { width: newObj.width, height: newObj.height },
+          boundedObjects,
+          viewport
+        ) ?? findEmptyPositionOutsideCluster(
+          { width: newObj.width, height: newObj.height },
+          boundedObjects
+        )
+      newObj.x = empty.x
+      newObj.y = empty.y
+      const afterRect = { x: newObj.x, y: newObj.y, width: newObj.width, height: newObj.height }
+      if (doesRectOverlapAny(afterRect, boundedObjects)) {
+        empty = findEmptyPositionOutsideCluster(
+          { width: newObj.width, height: newObj.height },
+          boundedObjects
+        )
+        newObj.x = empty.x
+        newObj.y = empty.y
+      }
+      posRef.current = {
+        x: size.width / 2 - empty.x * scale,
+        y: size.height / 2 - empty.y * scale,
+      }
+      setStagePos(posRef.current)
     }
 
     // If created inside a frame, set as child

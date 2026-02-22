@@ -115,4 +115,52 @@ describe('getAiCommandPolicy (client)', () => {
     expect(p.mode).toBe('complex')
     expect(p.allowGetBoardState).toBe(true)
   })
+
+  // ── Bulk creation path ────────────────────────────────────────────────────
+  it('treats "create 50 sticky notes" as compound with createBulkObjects', () => {
+    const p = getAiCommandPolicy('Create 50 sticky notes')
+    expect(p.mode).toBe('compound')
+    expect(p.forcedToolName).toBe('createBulkObjects')
+    expect(p.maxTurns).toBe(1)
+    expect(p.allowGetBoardState).toBe(false)
+  })
+
+  it('treats "add 20 rectangles" as compound bulk', () => {
+    const p = getAiCommandPolicy('Add 20 rectangles')
+    expect(p.mode).toBe('compound')
+    expect(p.forcedToolName).toBe('createBulkObjects')
+    expect(p.allowGetBoardState).toBe(false)
+  })
+
+  it('treats "create a dozen frames" as compound bulk', () => {
+    const p = getAiCommandPolicy('Create a dozen frames')
+    expect(p.mode).toBe('compound')
+    expect(p.forcedToolName).toBe('createBulkObjects')
+  })
+
+  it('treats "make several circles" as compound bulk', () => {
+    const p = getAiCommandPolicy('Make several circles')
+    expect(p.forcedToolName).toBe('createBulkObjects')
+  })
+
+  it('treats "add 100 text labels" as compound bulk', () => {
+    const p = getAiCommandPolicy('Add 100 text labels')
+    expect(p.forcedToolName).toBe('createBulkObjects')
+  })
+
+  it('does NOT treat single-object creation as bulk', () => {
+    const p = getAiCommandPolicy('Create a sticky note')
+    expect(p.forcedToolName).toBe('createStickyNote')
+    expect(p.forcedToolName).not.toBe('createBulkObjects')
+  })
+
+  it('does NOT treat "create 2 stickies" as bulk (below threshold)', () => {
+    const p = getAiCommandPolicy('Create 2 stickies')
+    expect(p.forcedToolName).not.toBe('createBulkObjects')
+  })
+
+  it('does NOT treat contextual creation as bulk — "create a sticky next to the blue frame"', () => {
+    const p = getAiCommandPolicy('Create a sticky note next to the blue frame')
+    expect(p.forcedToolName).not.toBe('createBulkObjects')
+  })
 })

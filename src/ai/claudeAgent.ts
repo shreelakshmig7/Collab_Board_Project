@@ -5,7 +5,7 @@
 import type { BoardObject } from '../types/board'
 import { supabase } from '../supabase/config'
 
-export type RunAIResult = { text: string; error?: string }
+export type RunAIResult = { text: string; error?: string; createdCenter?: { x: number; y: number } }
 
 const getFunctionsUrl = (): string => {
   const url = import.meta.env.VITE_SUPABASE_URL
@@ -20,7 +20,8 @@ const getFunctionsUrl = (): string => {
 export async function runAICommand(
   userMessage: string,
   currentObjects: BoardObject[],
-  boardId: string
+  boardId: string,
+  viewport?: { bounds: { x: number; y: number; width: number; height: number } }
 ): Promise<RunAIResult> {
   if (!supabase) {
     return { text: '', error: 'Supabase not configured' }
@@ -47,8 +48,22 @@ export async function runAICommand(
   const isCreationCommand = /create|add|new|put|place|draw|make/.test(messageLC)
   const isObjectRefCommand = /\b(move|drag|delete|remove|resize|rotate|change|update|rename)\b|color/.test(messageLC)
 
+  // Sync with policy.ts + aiCommandPolicy.ts: bulk creation routes to createBulkObjects compound tool.
+  // Send currentObjects for bulk so the edge can run placement (avoid overlap); use boardStateForPlacementOnly
+  // so the edge does not put the full board in the prompt (no extra tokens / latency).
+  const isBulkCreation =
+    isCreationCommand &&
+    /\b([3-9]|\d{2,}|ten|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|dozen|several|many|multiple|bunch)\b/i.test(messageLC) &&
+    /\b(sticky|stickies|note|notes|rect|rectangles?|squares?|circles?|shape|shapes|frame|frames|text)\b/i.test(messageLC)
+
+  // Query commands ask about existing board content — board state must be sent so Claude
+  // has something to reason about (or recognises it's empty and calls getBoardState).
+  const isQueryCommand =
+    /\b(how many|count|list|what|describe|show me|tell me)\b/i.test(messageLC) &&
+    /\b(objects?|sticky|stickies|frame|frames|shape|shapes|note|notes|board|canvas|rect|circle|text)\b/i.test(messageLC)
+
   const objectsToSend: BoardObject[] =
-    isComplexCommand || isCreationCommand || isObjectRefCommand
+    isComplexCommand || isCreationCommand || isObjectRefCommand || isQueryCommand
       ? currentObjects
       : []
 
@@ -56,6 +71,10 @@ export async function runAICommand(
     userMessage: userMessage.trim(),
     currentObjects: objectsToSend,
     boardId,
+    ...(isBulkCreation ? { boardStateForPlacementOnly: true } : {}),
+    ...(viewport?.bounds && typeof viewport.bounds.x === 'number' && typeof viewport.bounds.width === 'number'
+      ? { viewport: { bounds: viewport.bounds } }
+      : {}),
   })
 
   let token = session.access_token
@@ -100,5 +119,15 @@ export async function runAICommand(
     return { text: '', error: errMsg || `Request failed (${res.status})` }
   }
 
-  return { text: json.text ?? '', error: json.error }
+  const createdCenter =
+    json?.createdCenter &&
+    typeof json.createdCenter.x === 'number' &&
+    typeof json.createdCenter.y === 'number'
+      ? { x: json.createdCenter.x, y: json.createdCenter.y }
+      : undefined
+  return {
+    text: json.text ?? '',
+    error: json.error != null ? String(json.error) : undefined,
+    ...(createdCenter ? { createdCenter } : {}),
+  }
 }
