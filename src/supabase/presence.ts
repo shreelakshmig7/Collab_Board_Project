@@ -26,7 +26,7 @@ function isNetworkError(error: { message?: string } | null | undefined): boolean
 
 /** Mark current user as online (call on login and on heartbeat). Returns a promise so callers can await before subscribing. */
 export function upsertPresence(userId: string, displayName: string | null): Promise<void> {
-  return requireSupabase()
+  const chain = requireSupabase()
     .from(TABLE)
     .upsert(
       {
@@ -39,9 +39,9 @@ export function upsertPresence(userId: string, displayName: string | null): Prom
     .then(({ error }) => {
       if (error && !isNetworkError(error)) console.error('upsertPresence', error)
     })
-    .catch(() => {
-      // Network unavailable — silently skip
-    })
+  return Promise.resolve(chain).catch(() => {
+    // Network unavailable — silently skip
+  })
 }
 
 /** Remove current user from presence (call on logout / beforeunload). Returns a promise so callers can await before signOut. */

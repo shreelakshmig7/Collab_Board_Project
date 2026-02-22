@@ -148,7 +148,7 @@ const CLUSTER_PADDING = 24
  * so the new object does not overlap the cluster.
  */
 export function findEmptyPositionOutsideCluster(
-  objectSize: { width: number; height: number },
+  _objectSize: { width: number; height: number },
   objects: BoundedObject[]
 ): { x: number; y: number } {
   const withArea = objects.filter(hasArea)
