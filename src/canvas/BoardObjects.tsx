@@ -1325,7 +1325,7 @@ function BoardObjects({
 
         if (obj.type === 'sticky') {
           const color = obj.color ?? DEFAULT_STICKY_COLOR
-          const cacheKey = `${obj.id}-${obj.width}-${obj.height}-${obj.rotation ?? 0}-${color}-${isSelected}`
+          const cacheKey = `${obj.id}-${obj.width}-${obj.height}-${obj.rotation ?? 0}-${color}-${isSelected}-${obj.text ?? ''}-${obj.body_text ?? ''}`
           return (
             <CachedGroup key={obj.id} cacheKey={cacheKey}>
               <Group
@@ -1400,7 +1400,7 @@ function BoardObjects({
             p.arc(radius, radius, radius, 0, Math.PI * 2)
             return [p]
           }
-          const cacheKey = `${obj.id}-${diameter}-${obj.rotation ?? 0}-${color}-${isSelected}`
+          const cacheKey = `${obj.id}-${diameter}-${obj.rotation ?? 0}-${color}-${isSelected}-${obj.text ?? ''}`
           return (
             <CachedGroup key={obj.id} cacheKey={cacheKey}>
               <Group
@@ -1505,7 +1505,7 @@ function BoardObjects({
         if (obj.type === 'text') {
           const fontSize = obj.font_size ?? TEXT_DEFAULT_FONT_SIZE
           const fontColor = obj.font_color ?? DEFAULT_TEXT_COLOR
-          const cacheKey = `${obj.id}-${obj.width}-${obj.height}-${obj.rotation ?? 0}-${fontColor}-${isSelected}`
+          const cacheKey = `${obj.id}-${obj.width}-${obj.height}-${obj.rotation ?? 0}-${fontColor}-${isSelected}-${obj.text ?? ''}`
           return (
             <CachedGroup key={obj.id} cacheKey={cacheKey}>
               <Group
@@ -1582,7 +1582,7 @@ function BoardObjects({
 
         // Default: rect
         const color = obj.color ?? DEFAULT_SHAPE_COLOR
-        const cacheKey = `${obj.id}-${obj.width}-${obj.height}-${obj.rotation ?? 0}-${color}-${isSelected}`
+        const cacheKey = `${obj.id}-${obj.width}-${obj.height}-${obj.rotation ?? 0}-${color}-${isSelected}-${obj.text ?? ''}`
         return (
           <CachedGroup key={obj.id} cacheKey={cacheKey}>
             <Group
