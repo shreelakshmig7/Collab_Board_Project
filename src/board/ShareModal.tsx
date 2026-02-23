@@ -149,7 +149,7 @@ export default function ShareModal({
       onKeyDown={handleKeyDown}
     >
       <div
-        className="bg-white rounded-2xl shadow-xl p-6 max-w-md w-full mx-4 flex flex-col gap-4 max-h-[85vh] overflow-y-auto"
+        className="bg-white/40 backdrop-blur-md border border-white/20 rounded-2xl shadow-2xl p-6 max-w-md w-full mx-4 flex flex-col gap-4 max-h-[85vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">

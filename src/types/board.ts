@@ -33,4 +33,6 @@ export type BoardObject = {
   to_x?: number
   /** @see to_x */
   to_y?: number
+  /** Rendering layer order — higher value renders on top. Persisted in DB. */
+  z_index?: number
 }

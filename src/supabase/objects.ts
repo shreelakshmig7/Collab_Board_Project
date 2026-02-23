@@ -49,6 +49,7 @@ function rowToBoardObject(row: Record<string, unknown>): BoardObject {
     to_y: row.to_y != null ? Number(row.to_y) : undefined,
     font_size: row.font_size != null ? Number(row.font_size) : undefined,
     font_color: row.font_color != null ? String(row.font_color) : undefined,
+    z_index: row.z_index != null ? Number(row.z_index) : 0,
   }
 }
 
@@ -69,6 +70,8 @@ export function subscribeObjects(
       .from(TABLE)
       .select(ALL_COLUMNS)
       .eq('board_id', boardId)
+      .order('z_index', { ascending: true })
+      .order('updated_at', { ascending: true })
     if (error) {
       console.error('subscribeObjects error', error)
       return
@@ -123,6 +126,8 @@ export async function getObjects(boardId: string): Promise<BoardObject[]> {
     .from(TABLE)
     .select(ALL_COLUMNS)
     .eq('board_id', boardId)
+    .order('z_index', { ascending: true })
+    .order('updated_at', { ascending: true })
   if (error) throw error
   return (data ?? []).map((row) => rowToBoardObject(row as Record<string, unknown>))
 }
@@ -147,6 +152,7 @@ export async function addObject(boardId: string, obj: BoardObject): Promise<void
     style: obj.style ?? null,
     font_size: obj.font_size ?? null,
     font_color: obj.font_color ?? null,
+    z_index: obj.z_index ?? 0,
     updated_at: new Date().toISOString(),
   })
   if (error) throw error
@@ -187,6 +193,7 @@ export async function updateObject(
   if ('to_y' in partial) row.to_y = partial.to_y ?? null
   if (p.font_size !== undefined) row.font_size = p.font_size
   if (p.font_color !== undefined) row.font_color = p.font_color
+  if (p.z_index !== undefined) row.z_index = p.z_index
   const { error } = await requireSupabase()
     .from(TABLE)
     .update(row)

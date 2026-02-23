@@ -1,4 +1,5 @@
-import { memo, useRef } from 'react'
+import { memo, useRef, useEffect } from 'react'
+import React from 'react'
 import { Group, Rect, Text, Circle, Arrow, Line } from 'react-konva'
 import Konva from 'konva'
 import type { BoardObject } from '../types/board'
@@ -17,6 +18,36 @@ import { updateObject } from '../supabase/objects.ts'
 const DRAG_UPDATE_THROTTLE_MS = 40
 /** Slower throttle for nested frames to reduce lag/flash during drag */
 const NESTED_FRAME_DRAG_THROTTLE_MS = 120
+
+/** Keep canvas object effects lightweight; glass lives on static overlays, not board objects. */
+const SHADOW = {
+  shadowColor: 'black',
+  shadowBlur: 0,
+  shadowOffsetX: 0,
+  shadowOffsetY: 0,
+  shadowOpacity: 0,
+} as const
+
+/**
+ * Wraps a Konva Group so it is cached after paint. Invalidates cache when cacheKey changes.
+ * Critical for performance: avoids redrawing shadows on every pan/zoom frame.
+ */
+function CachedGroup({
+  cacheKey,
+  children,
+}: {
+  cacheKey: string
+  children: React.ReactElement
+}) {
+  const ref = useRef<Konva.Group>(null)
+  useEffect(() => {
+    const node = ref.current
+    if (!node) return
+    node.clearCache()
+    node.cache()
+  }, [cacheKey])
+  return React.cloneElement(children, { ref })
+}
 
 /** When stored text is empty, show watermark (not stored). Returns display text and whether it is placeholder. */
 function getDisplayText(raw: string | undefined): { text: string; isWatermark: boolean } {
@@ -114,6 +145,8 @@ type BoardObjectsProps = {
   objects: BoardObject[]
   selectedIds: string[]
   onObjectClick: (id: string, shiftKey: boolean) => void
+  /** Right-click on object: (objectId, clientX, clientY) for context menu */
+  onObjectContextMenu?: (id: string, clientX: number, clientY: number) => void
   onStartEditText?: (id: string, text: string, part?: 'header' | 'body') => void
   onObjectMoved?: (id: string, x: number, y: number) => void
   onObjectParentChange?: (id: string, parentId: string | null) => void
@@ -136,6 +169,7 @@ function BoardObjects({
   objects,
   selectedIds,
   onObjectClick,
+  onObjectContextMenu,
   onStartEditText,
   onObjectMoved,
   onObjectParentChange,
@@ -275,49 +309,59 @@ function BoardObjects({
           onDragEnd?.()
         }
 
+        const allDescendants = getFrameDescendants(objects, obj.id)
+        const descendantsKey = allDescendants
+          .map((d) => `${d.id}:${d.x}:${d.y}:${d.color ?? ''}:${d.text ?? ''}`)
+          .join('|')
+        const frameCacheKey = `${obj.id}-${obj.width}-${obj.height}-${obj.rotation ?? 0}-${color}-${isSelected}-${descendantsKey}`
         return (
-          <Group
-            key={obj.id}
-            id={obj.id}
-            x={obj.x}
-            y={obj.y}
-            rotation={obj.rotation ?? 0}
-            draggable={draggable}
-            onClick={(e) => {
-              e.cancelBubble = true
-              onObjectClick(obj.id, e.evt.shiftKey)
-            }}
-            onTap={(e) => {
-              e.cancelBubble = true
-              onObjectClick(obj.id, false)
-            }}
-            onDragStart={(e) => {
-              e.cancelBubble = true
-              onDragStart?.(obj.id)
-            }}
-            onDragMove={(e) => {
-              e.cancelBubble = true
-              const { x, y } = getDragPosition(e, obj.id)
-              throttleDragUpdate(obj.id, x, y)
-              if (isMultiSelect && selectedIds.includes(obj.id)) {
-                onMultiDragMove?.(obj.id, x, y)
-              }
-            }}
+          <CachedGroup key={obj.id} cacheKey={frameCacheKey}>
+            <Group
+              id={obj.id}
+              x={obj.x}
+              y={obj.y}
+              rotation={obj.rotation ?? 0}
+              draggable={draggable}
+              onClick={(e) => {
+                e.cancelBubble = true
+                onObjectClick(obj.id, e.evt.shiftKey)
+              }}
+              onTap={(e) => {
+                e.cancelBubble = true
+                onObjectClick(obj.id, false)
+              }}
+              onDragStart={(e) => {
+                e.cancelBubble = true
+                onDragStart?.(obj.id)
+              }}
+              onDragMove={(e) => {
+                e.cancelBubble = true
+                const { x, y } = getDragPosition(e, obj.id)
+                throttleDragUpdate(obj.id, x, y)
+                if (isMultiSelect && selectedIds.includes(obj.id)) {
+                  onMultiDragMove?.(obj.id, x, y)
+                }
+              }}
             onDragEnd={(e) => {
               e.cancelBubble = true
               handleFrameDragEnd(e)
             }}
-          >
-            {/* Frame body */}
-            <Rect
-              width={obj.width}
-              height={obj.height}
-              fill="rgba(99, 102, 241, 0.05)"
-              stroke={isSelected ? '#2563eb' : isPending ? '#f59e0b' : color}
-              strokeWidth={isSelected ? 3 : 2}
-              cornerRadius={4}
-              dash={[8, 4]}
-            />
+            onContextMenu={(e) => {
+              e.evt.preventDefault()
+              onObjectContextMenu?.(obj.id, e.evt.clientX, e.evt.clientY)
+            }}
+            >
+              {/* Frame body */}
+              <Rect
+                width={obj.width}
+                height={obj.height}
+                fill="rgba(99, 102, 241, 0.05)"
+                stroke={isSelected ? '#2563eb' : isPending ? '#f59e0b' : color}
+                strokeWidth={isSelected ? 4 : 2}
+                cornerRadius={4}
+                dash={isSelected ? [6, 4] : [8, 4]}
+                {...SHADOW}
+              />
             {/* Title bar — double-click to edit header */}
             <Group
               onDblClick={(e) => {
@@ -1268,7 +1312,8 @@ function BoardObjects({
                 </Group>
               )
             })}
-          </Group>
+            </Group>
+          </CachedGroup>
         )
       })}
 
@@ -1280,40 +1325,47 @@ function BoardObjects({
 
         if (obj.type === 'sticky') {
           const color = obj.color ?? DEFAULT_STICKY_COLOR
+          const cacheKey = `${obj.id}-${obj.width}-${obj.height}-${obj.rotation ?? 0}-${color}-${isSelected}`
           return (
-            <Group
-              key={obj.id}
-              id={obj.id}
-              x={obj.x}
-              y={obj.y}
-              rotation={obj.rotation ?? 0}
-              draggable={draggable}
-              onClick={(e) => {
-                e.cancelBubble = true
-                onObjectClick(obj.id, e.evt.shiftKey)
-              }}
-              onTap={(e) => {
-                e.cancelBubble = true
-                onObjectClick(obj.id, false)
-              }}
-              {...makeDragHandlers(obj)}
-              onDblClick={(e) => {
-                e.cancelBubble = true
-                startEditText?.(obj.id, obj.text ?? '')
-              }}
-              onDblTap={(e) => {
-                e.cancelBubble = true
-                startEditText?.(obj.id, obj.text ?? '')
-              }}
-            >
-              <Rect
-                width={obj.width}
-                height={obj.height}
-                fill={color}
-                cornerRadius={8}
-                stroke={selectionStroke ?? 'transparent'}
-                strokeWidth={selectionStroke ? 3 : 0}
-              />
+            <CachedGroup key={obj.id} cacheKey={cacheKey}>
+              <Group
+                id={obj.id}
+                x={obj.x}
+                y={obj.y}
+                rotation={obj.rotation ?? 0}
+                draggable={draggable}
+                onClick={(e) => {
+                  e.cancelBubble = true
+                  onObjectClick(obj.id, e.evt.shiftKey)
+                }}
+                onTap={(e) => {
+                  e.cancelBubble = true
+                  onObjectClick(obj.id, false)
+                }}
+                {...makeDragHandlers(obj)}
+                onDblClick={(e) => {
+                  e.cancelBubble = true
+                  startEditText?.(obj.id, obj.text ?? '')
+                }}
+                onDblTap={(e) => {
+                  e.cancelBubble = true
+                  startEditText?.(obj.id, obj.text ?? '')
+                }}
+                onContextMenu={(e) => {
+                  e.evt.preventDefault()
+                  onObjectContextMenu?.(obj.id, e.evt.clientX, e.evt.clientY)
+                }}
+              >
+                <Rect
+                  width={obj.width}
+                  height={obj.height}
+                  fill={color}
+                  cornerRadius={8}
+                  stroke={selectionStroke ?? 'transparent'}
+                  strokeWidth={selectionStroke ? 4 : 0}
+                  dash={selectionStroke ? [6, 4] : undefined}
+                  {...SHADOW}
+                />
               {(() => {
                 const { text: dispText, isWatermark } = getDisplayText(obj.text)
                 return (
@@ -1333,7 +1385,8 @@ function BoardObjects({
                   />
                 )
               })()}
-            </Group>
+              </Group>
+            </CachedGroup>
           )
         }
 
@@ -1347,41 +1400,48 @@ function BoardObjects({
             p.arc(radius, radius, radius, 0, Math.PI * 2)
             return [p]
           }
+          const cacheKey = `${obj.id}-${diameter}-${obj.rotation ?? 0}-${color}-${isSelected}`
           return (
-            <Group
-              key={obj.id}
-              id={obj.id}
-              x={obj.x}
-              y={obj.y}
-              rotation={obj.rotation ?? 0}
-              draggable={draggable}
-              clipFunc={clipPath}
-              onClick={(e) => {
-                e.cancelBubble = true
-                onObjectClick(obj.id, e.evt.shiftKey)
-              }}
-              onTap={(e) => {
-                e.cancelBubble = true
-                onObjectClick(obj.id, false)
-              }}
-              {...makeDragHandlers(obj)}
-              onDblClick={(e) => {
-                e.cancelBubble = true
-                startEditText?.(obj.id, obj.text ?? '')
-              }}
-              onDblTap={(e) => {
-                e.cancelBubble = true
-                startEditText?.(obj.id, obj.text ?? '')
-              }}
-            >
-              <Circle
-                x={radius}
-                y={radius}
-                radius={radius}
-                fill={color}
-                stroke={selectionStroke ?? '#333'}
-                strokeWidth={selectionStroke ? 3 : 2}
-              />
+            <CachedGroup key={obj.id} cacheKey={cacheKey}>
+              <Group
+                id={obj.id}
+                x={obj.x}
+                y={obj.y}
+                rotation={obj.rotation ?? 0}
+                draggable={draggable}
+                clipFunc={clipPath}
+                onClick={(e) => {
+                  e.cancelBubble = true
+                  onObjectClick(obj.id, e.evt.shiftKey)
+                }}
+                onTap={(e) => {
+                  e.cancelBubble = true
+                  onObjectClick(obj.id, false)
+                }}
+                {...makeDragHandlers(obj)}
+                onDblClick={(e) => {
+                  e.cancelBubble = true
+                  startEditText?.(obj.id, obj.text ?? '')
+                }}
+                onDblTap={(e) => {
+                  e.cancelBubble = true
+                  startEditText?.(obj.id, obj.text ?? '')
+                }}
+                onContextMenu={(e) => {
+                  e.evt.preventDefault()
+                  onObjectContextMenu?.(obj.id, e.evt.clientX, e.evt.clientY)
+                }}
+              >
+                <Circle
+                  x={radius}
+                  y={radius}
+                  radius={radius}
+                  fill={color}
+                  stroke={selectionStroke ?? '#333'}
+                  strokeWidth={selectionStroke ? 4 : 2}
+                  dash={selectionStroke ? [6, 4] : undefined}
+                  {...SHADOW}
+                />
               {(() => {
                 const { text: dispText, isWatermark } = getDisplayText(obj.text)
                 return (
@@ -1401,7 +1461,8 @@ function BoardObjects({
                   />
                 )
               })()}
-            </Group>
+              </Group>
+            </CachedGroup>
           )
         }
 
@@ -1424,6 +1485,10 @@ function BoardObjects({
                 onObjectClick(obj.id, false)
               }}
               {...makeDragHandlers(obj)}
+              onContextMenu={(e) => {
+                e.evt.preventDefault()
+                onObjectContextMenu?.(obj.id, e.evt.clientX, e.evt.clientY)
+              }}
             >
               <Line
                 points={[0, 0, obj.width, obj.height]}
@@ -1440,9 +1505,87 @@ function BoardObjects({
         if (obj.type === 'text') {
           const fontSize = obj.font_size ?? TEXT_DEFAULT_FONT_SIZE
           const fontColor = obj.font_color ?? DEFAULT_TEXT_COLOR
+          const cacheKey = `${obj.id}-${obj.width}-${obj.height}-${obj.rotation ?? 0}-${fontColor}-${isSelected}`
           return (
+            <CachedGroup key={obj.id} cacheKey={cacheKey}>
+              <Group
+                id={obj.id}
+                x={obj.x}
+                y={obj.y}
+                rotation={obj.rotation ?? 0}
+                draggable={draggable}
+                onClick={(e) => {
+                  e.cancelBubble = true
+                  onObjectClick(obj.id, e.evt.shiftKey)
+                }}
+                onTap={(e) => {
+                  e.cancelBubble = true
+                  onObjectClick(obj.id, false)
+                }}
+                {...makeDragHandlers(obj)}
+                onDblClick={(e) => {
+                  e.cancelBubble = true
+                  startEditText?.(obj.id, obj.text ?? '')
+                }}
+                onDblTap={(e) => {
+                  e.cancelBubble = true
+                  startEditText?.(obj.id, obj.text ?? '')
+                }}
+                onContextMenu={(e) => {
+                  e.evt.preventDefault()
+                  onObjectContextMenu?.(obj.id, e.evt.clientX, e.evt.clientY)
+                }}
+              >
+                {isSelected && (
+                  <Rect
+                    x={-4}
+                    y={-4}
+                    width={obj.width + 8}
+                    height={obj.height + 8}
+                    fill="transparent"
+                    stroke="#2563eb"
+                    strokeWidth={4}
+                    dash={[6, 4]}
+                    cornerRadius={4}
+                    listening={false}
+                  />
+                )}
+                <Rect
+                  x={0}
+                  y={0}
+                  width={obj.width}
+                  height={obj.height}
+                  fill="transparent"
+                  listening={false}
+                  {...SHADOW}
+                />
+                {(() => {
+                  const { text: dispText, isWatermark } = getDisplayText(obj.text)
+                  return (
+                    <Text
+                      text={dispText}
+                      width={obj.width}
+                      height={obj.height}
+                      fontSize={fontSize}
+                      fill={isWatermark ? WATERMARK_FILL : fontColor}
+                      fontStyle={isWatermark ? 'italic' : 'normal'}
+                      wrap="word"
+                      align="left"
+                      verticalAlign="top"
+                    />
+                  )
+                })()}
+              </Group>
+            </CachedGroup>
+          )
+        }
+
+        // Default: rect
+        const color = obj.color ?? DEFAULT_SHAPE_COLOR
+        const cacheKey = `${obj.id}-${obj.width}-${obj.height}-${obj.rotation ?? 0}-${color}-${isSelected}`
+        return (
+          <CachedGroup key={obj.id} cacheKey={cacheKey}>
             <Group
-              key={obj.id}
               id={obj.id}
               x={obj.x}
               y={obj.y}
@@ -1465,76 +1608,20 @@ function BoardObjects({
                 e.cancelBubble = true
                 startEditText?.(obj.id, obj.text ?? '')
               }}
+              onContextMenu={(e) => {
+                e.evt.preventDefault()
+                onObjectContextMenu?.(obj.id, e.evt.clientX, e.evt.clientY)
+              }}
             >
-              {isSelected && (
-                <Rect
-                  x={-4}
-                  y={-4}
-                  width={obj.width + 8}
-                  height={obj.height + 8}
-                  fill="transparent"
-                  stroke="#2563eb"
-                  strokeWidth={2}
-                  dash={[4, 3]}
-                  cornerRadius={4}
-                  listening={false}
-                />
-              )}
-              {(() => {
-                const { text: dispText, isWatermark } = getDisplayText(obj.text)
-                return (
-                  <Text
-                    text={dispText}
-                    width={obj.width}
-                    height={obj.height}
-                    fontSize={fontSize}
-                    fill={isWatermark ? WATERMARK_FILL : fontColor}
-                    fontStyle={isWatermark ? 'italic' : 'normal'}
-                    wrap="word"
-                    align="left"
-                    verticalAlign="top"
-                  />
-                )
-              })()}
-            </Group>
-          )
-        }
-
-        // Default: rect
-        const color = obj.color ?? DEFAULT_SHAPE_COLOR
-        return (
-          <Group
-            key={obj.id}
-            id={obj.id}
-            x={obj.x}
-            y={obj.y}
-            rotation={obj.rotation ?? 0}
-            draggable={draggable}
-            onClick={(e) => {
-              e.cancelBubble = true
-              onObjectClick(obj.id, e.evt.shiftKey)
-            }}
-            onTap={(e) => {
-              e.cancelBubble = true
-              onObjectClick(obj.id, false)
-            }}
-            {...makeDragHandlers(obj)}
-            onDblClick={(e) => {
-              e.cancelBubble = true
-              startEditText?.(obj.id, obj.text ?? '')
-            }}
-            onDblTap={(e) => {
-              e.cancelBubble = true
-              startEditText?.(obj.id, obj.text ?? '')
-            }}
-          >
-            <Rect
-              width={obj.width}
-              height={obj.height}
-              fill={color}
-              stroke={selectionStroke ?? '#333'}
-              strokeWidth={selectionStroke ? 3 : 2}
-            />
+              <Rect
+                width={obj.width}
+                height={obj.height}
+                fill={color}
+                stroke={selectionStroke ?? '#333'}
+                strokeWidth={selectionStroke ? 4 : 2}
+                dash={selectionStroke ? [6, 4] : undefined}
+                {...SHADOW}
+              />
             {(() => {
               const { text: dispText, isWatermark } = getDisplayText(obj.text)
               return (
@@ -1554,7 +1641,8 @@ function BoardObjects({
                 />
               )
             })()}
-          </Group>
+              </Group>
+            </CachedGroup>
         )
       })}
 
@@ -1644,6 +1732,10 @@ function BoardObjects({
               const newFromY = node.y()
               onConnectorMoved?.(obj.id, newFromX, newFromY, newFromX + width, newFromY + height)
               onDragEnd?.()
+            }}
+            onContextMenu={(e) => {
+              e.evt.preventDefault()
+              onObjectContextMenu?.(obj.id, e.evt.clientX, e.evt.clientY)
             }}
           >
             {isArrow ? (

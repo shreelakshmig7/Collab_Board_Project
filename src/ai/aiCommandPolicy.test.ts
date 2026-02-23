@@ -64,6 +64,24 @@ describe('getAiCommandPolicy (client)', () => {
     expect(p.forcedToolName).toBe('createColumnLayout')
   })
 
+  it('treats flowchart as compound with createFlowchart', () => {
+    const p = getAiCommandPolicy('Create a flowchart for user onboarding')
+    expect(p.mode).toBe('compound')
+    expect(p.forcedToolName).toBe('createFlowchart')
+    expect(p.maxTurns).toBe(1)
+    expect(p.allowGetBoardState).toBe(false)
+  })
+
+  it('treats flow chart (two words) as compound with createFlowchart', () => {
+    const p = getAiCommandPolicy('Make a flow chart for the checkout process')
+    expect(p.forcedToolName).toBe('createFlowchart')
+  })
+
+  it('treats process flow as compound with createFlowchart', () => {
+    const p = getAiCommandPolicy('Create a process flow for customer support')
+    expect(p.forcedToolName).toBe('createFlowchart')
+  })
+
   it('treats clear board as compound with clearBoard', () => {
     const p = getAiCommandPolicy('Clear the board')
     expect(p.mode).toBe('compound')
@@ -103,6 +121,27 @@ describe('getAiCommandPolicy (client)', () => {
     expect(p.allowGetBoardState).toBe(true)
   })
 
+  // ── Creation grid path ───────────────────────────────────────────────────
+  it('treats "create a 2x3 grid of sticky notes" as compound creation grid', () => {
+    const p = getAiCommandPolicy('Create a 2x3 grid of sticky notes for pros and cons')
+    expect(p.mode).toBe('compound')
+    expect(p.maxTurns).toBe(2)
+    expect(p.allowGetBoardState).toBe(false)
+    expect(p.forcedToolName).toBeUndefined()
+  })
+
+  it('treats "make a grid of rectangles" as creation grid', () => {
+    const p = getAiCommandPolicy('Make a grid of rectangles for the team')
+    expect(p.mode).toBe('compound')
+    expect(p.maxTurns).toBe(2)
+  })
+
+  it('does NOT treat "arrange in a grid" as creation grid (no creation keyword)', () => {
+    const p = getAiCommandPolicy('Arrange these sticky notes in a grid')
+    expect(p.mode).toBe('complex')
+    expect(p.allowGetBoardState).toBe(true)
+  })
+
   // ── Generic complex path ─────────────────────────────────────────────────
   it('treats multi-step prompts as complex', () => {
     const p = getAiCommandPolicy('Add a sticky note and connect it to the frame')
@@ -111,7 +150,7 @@ describe('getAiCommandPolicy (client)', () => {
   })
 
   it('treats arrange as complex multi-turn', () => {
-    const p = getAiCommandPolicy('Arrange these sticky notes in a grid')
+    const p = getAiCommandPolicy('Arrange the objects evenly')
     expect(p.mode).toBe('complex')
     expect(p.allowGetBoardState).toBe(true)
   })

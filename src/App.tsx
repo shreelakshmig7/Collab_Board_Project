@@ -46,8 +46,10 @@ function BoardPageWrapper({ user, presenceNames }: { user: AppUser; presenceName
 
   if (!boardId || notFound || boardName === null) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <p className="text-gray-500">Loading board…</p>
+      <div className="min-h-screen flex items-center justify-center bg-gray-100/80">
+        <div className="px-8 py-6 bg-white/40 backdrop-blur-md border border-white/20 rounded-2xl shadow-xl">
+          <p className="text-gray-600">Loading board…</p>
+        </div>
       </div>
     )
   }
@@ -102,8 +104,10 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <p className="text-gray-500">Loading…</p>
+      <div className="min-h-screen flex items-center justify-center bg-gray-100/80">
+        <div className="px-8 py-6 bg-white/40 backdrop-blur-md border border-white/20 rounded-2xl shadow-xl">
+          <p className="text-gray-600">Loading…</p>
+        </div>
       </div>
     )
   }

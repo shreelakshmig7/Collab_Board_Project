@@ -15,8 +15,9 @@ const COMPLEX_RE = /arrange|grid|swot|journey|retro|template|space|align|distrib
 const OBJECT_REF_RE = /\b(move|drag|delete|remove|resize|rotate|change|update|rename)\b|color/i
 const QUERY_RE_INTENT = /\b(how many|count|list|what|describe|show me|tell me)\b/i
 const QUERY_RE_OBJECT = /\b(objects?|sticky|stickies|frame|frames|shape|shapes|note|notes|board|canvas|rect|circle|text)\b/i
+const OPS_INLINE_THRESHOLD = 25
 
-function classifyMessage(msg: string) {
+function classifyMessage(msg: string, objectCount = 0) {
   const lc = msg.trim().toLowerCase()
   const isCreation = CREATION_RE.test(lc)
   const isBulkCreation =
@@ -26,9 +27,11 @@ function classifyMessage(msg: string) {
   const isComplexCommand = COMPLEX_RE.test(lc)
   const isObjectRefCommand = OBJECT_REF_RE.test(lc)
   const isQueryCommand = QUERY_RE_INTENT.test(lc) && QUERY_RE_OBJECT.test(lc)
+  const isSmallBoard = objectCount <= OPS_INLINE_THRESHOLD
 
   if (isBulkCreation) return 'bulk'
-  if (isComplexCommand || isCreation || isObjectRefCommand || isQueryCommand) return 'sendBoardState'
+  if (isComplexCommand || isCreation || isQueryCommand) return 'sendBoardState'
+  if (isObjectRefCommand && isSmallBoard) return 'sendBoardState'
   return 'noBoardState'
 }
 
@@ -90,7 +93,27 @@ describe('claudeAgent board-state routing', () => {
     expect(classifyMessage('Create a sticky note')).toBe('sendBoardState')
   })
 
-  it('sends board state for move command (unchanged)', () => {
-    expect(classifyMessage('Move the red sticky to the right')).toBe('sendBoardState')
+  it('sends board state inline for move on small board (≤25 objects)', () => {
+    expect(classifyMessage('Move the red sticky to the right', 10)).toBe('sendBoardState')
+  })
+
+  it('sends board state inline for delete on small board', () => {
+    expect(classifyMessage('Delete all the blue rectangles', 5)).toBe('sendBoardState')
+  })
+
+  it('sends board state inline for change color on small board', () => {
+    expect(classifyMessage('Change the sticky note color to red', 20)).toBe('sendBoardState')
+  })
+
+  it('sends board state inline for resize on small board', () => {
+    expect(classifyMessage('Resize the frame to be larger', 1)).toBe('sendBoardState')
+  })
+
+  it('does NOT send inline board state for move on large board (>25 objects)', () => {
+    expect(classifyMessage('Move the red sticky to the right', 26)).toBe('noBoardState')
+  })
+
+  it('does NOT send inline board state for delete on large board', () => {
+    expect(classifyMessage('Delete all the blue rectangles', 50)).toBe('noBoardState')
   })
 })

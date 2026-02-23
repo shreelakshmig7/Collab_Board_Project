@@ -13,9 +13,10 @@ const CONNECTOR_RE = /\b(connect|connector|arrow)\b/i
 const MULTI_STEP_RE = /\b(and|then|also)\b/i
 const ARRANGE_RE = /\b(arrange|space|align|distribute)\b/i
 
-const CLEAR_RE = /\b(clear|wipe|reset|start\s+fresh|delete\s+all|remove\s+all|erase\s+all)\b/i
+const CLEAR_RE = /\b(clear|wipe|start\s+fresh|delete\s+all|remove\s+all|erase\s+all)\b|\breset\s+(?:the\s+)?(?:board|canvas)\b/i
 const QUADRANT_RE = /\b(swot|quadrant|2x2|four[\s-]quadrant|matrix\s+diagram)\b/i
 const COLUMN_RE = /\b(retro|retrospective|kanban|user[\s-]journey|journey[\s-]map|column[\s-]layout)\b/i
+const FLOWCHART_RE = /\b(flowchart|flow[\s-]chart|flow[\s-]diagram|process[\s-]flow)\b/i
 
 // Bulk creation classifiers — sync with supabase/functions/ai-command/policy.ts
 const BULK_QUANTITY_RE = /\b([3-9]|\d{2,}|ten|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|dozen|several|many|multiple|bunch)\b/i
@@ -46,10 +47,20 @@ export const getAiCommandPolicy = (userMessage: string): AiCommandPolicy => {
     return { mode: 'compound', maxTurns: 1, maxTokens: 1024, allowGetBoardState: false, forcedToolName: 'createColumnLayout' }
   }
 
+  if (FLOWCHART_RE.test(msg)) {
+    return { mode: 'compound', maxTurns: 1, maxTokens: 1024, allowGetBoardState: false, forcedToolName: 'createFlowchart' }
+  }
+
   // Bulk creation: 3+ objects of the same type — server batch-inserts all in one call.
   const isBulk = CREATION_RE.test(msg) && BULK_QUANTITY_RE.test(msg) && BULK_OBJECT_TYPE_RE.test(msg)
   if (isBulk) {
     return { mode: 'compound', maxTurns: 1, maxTokens: 1024, allowGetBoardState: false, forcedToolName: 'createBulkObjects' }
+  }
+
+  // Creation + grid: structured creation — faster path than generic complex
+  const isCreationGrid = CREATION_RE.test(msg) && /\bgrid\b/i.test(msg)
+  if (isCreationGrid) {
+    return { mode: 'compound', maxTurns: 2, maxTokens: 2048, allowGetBoardState: false }
   }
 
   const looksComplex =

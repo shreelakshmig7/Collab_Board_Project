@@ -15,9 +15,10 @@ const MULTI_STEP_RE = /\b(and|then|also)\b/i
 const ARRANGE_RE = /\b(arrange|space|align|distribute)\b/i
 
 // Compound tool classifiers — checked before generic complex
-const CLEAR_RE = /\b(clear|wipe|reset|start\s+fresh|delete\s+all|remove\s+all|erase\s+all)\b/i
+const CLEAR_RE = /\b(clear|wipe|start\s+fresh|delete\s+all|remove\s+all|erase\s+all)\b|\breset\s+(?:the\s+)?(?:board|canvas)\b/i
 const QUADRANT_RE = /\b(swot|quadrant|2x2|four[\s-]quadrant|matrix\s+diagram)\b/i
 const COLUMN_RE = /\b(retro|retrospective|kanban|user[\s-]journey|journey[\s-]map|column[\s-]layout)\b/i
+const FLOWCHART_RE = /\b(flowchart|flow[\s-]chart|flow[\s-]diagram|process[\s-]flow)\b/i
 
 // Bulk creation classifiers — sync with src/ai/aiCommandPolicy.ts
 const BULK_QUANTITY_RE = /\b([3-9]|\d{2,}|ten|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|dozen|several|many|multiple|bunch)\b/i
@@ -68,6 +69,18 @@ export const getPolicyForMessage = (userMessage: string): AiPolicy => {
     }
   }
 
+  // Compound: flowchart / flow diagram / process flow
+  if (FLOWCHART_RE.test(msg)) {
+    return {
+      modelTier: 'smart',
+      maxTurns: 1,
+      maxTokens: 1024,
+      allowGetBoardState: false,
+      forcedToolName: 'createFlowchart',
+      returnAfterToolExecution: true,
+    }
+  }
+
   // Bulk creation: 3+ objects of the same type — server batch-inserts all in one call.
   // Checked before simple creation so "create 50 stickies" never hits the singular forced-tool path.
   const isBulk = CREATION_RE.test(msg) && BULK_QUANTITY_RE.test(msg) && BULK_OBJECT_TYPE_RE.test(msg)
@@ -78,6 +91,20 @@ export const getPolicyForMessage = (userMessage: string): AiPolicy => {
       maxTokens: 1024,
       allowGetBoardState: false,
       forcedToolName: 'createBulkObjects',
+      returnAfterToolExecution: true,
+    }
+  }
+
+  // Creation + grid: structured creation (e.g. "create a 2x3 grid of sticky notes for pros and cons").
+  // Faster than generic complex — Sonnet decides content/colors, tools run, return immediately.
+  // "Arrange objects in a grid" (no CREATION_RE) still falls through to looksComplex below.
+  const isCreationGrid = CREATION_RE.test(msg) && /\bgrid\b/i.test(msg)
+  if (isCreationGrid) {
+    return {
+      modelTier: 'smart',
+      maxTurns: 2,
+      maxTokens: 2048,
+      allowGetBoardState: false,
       returnAfterToolExecution: true,
     }
   }
@@ -136,7 +163,7 @@ export const getPolicyForMessage = (userMessage: string): AiPolicy => {
       maxTurns: 3,
       maxTokens: 1024,
       allowGetBoardState: true,
-      returnAfterToolExecution: false,
+      returnAfterToolExecution: true,
     }
   }
 

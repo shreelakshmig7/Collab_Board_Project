@@ -68,6 +68,20 @@ const COL_MIN_INNER_H = 380
 const COL_FRAME_COLORS = ['#16a34a', '#dc2626', '#2563eb', '#d97706', '#7c3aed', '#b45309']
 const COL_STICKY_COLORS = ['#86efac', '#fca5a5', '#93c5fd', '#fdba74', '#c4b5fd', '#fde68a']
 
+// Compound layout constants — flowchart (vertical stack of typed nodes inside a frame)
+const FLOW_NODE_W = 200
+const FLOW_NODE_H = 70
+const FLOW_NODE_GAP = 40
+const FLOW_OUTER_PAD = 20
+const FLOW_OUTER_TITLE_H = 40
+
+const FLOW_NODE_COLORS: Record<string, string> = {
+  start: '#86efac',
+  process: '#93c5fd',
+  decision: '#fde68a',
+  end: '#fca5a5',
+}
+
 const BOARD_STATE_OBJECT_CAP = 200
 
 const corsHeaders = {
@@ -144,7 +158,7 @@ const TOOLS = [
   // ── Compound tools ────────────────────────────────────────────────────────
   {
     name: 'createQuadrant',
-    description: 'Create a complete 2×2 quadrant diagram (SWOT analysis, matrix). The server builds the full layout — frame, axis lines, quadrant labels, and sticky notes — in a single operation.',
+    description: 'Create a complete 2×2 quadrant diagram (SWOT analysis, matrix). The server builds the full layout — frame, quadrant labels, and sticky notes — in a single operation. Always include 2-3 relevant items per quadrant — never leave quadrants empty.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -175,7 +189,7 @@ const TOOLS = [
   },
   {
     name: 'createColumnLayout',
-    description: 'Create a complete column-based layout (retrospective, kanban, user journey map). The server builds the full layout — frame, column headers, and sticky notes — in a single operation.',
+    description: 'Create a complete column-based layout (retrospective, kanban, user journey map). The server builds the full layout — frame, column headers, and sticky notes — in a single operation. Always include 2-3 relevant items per column — never leave columns empty.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -221,6 +235,56 @@ const TOOLS = [
       required: ['objectType', 'count'],
     },
   },
+  {
+    name: 'createFlowchart',
+    description: 'Create a complete flowchart diagram. The server builds the full layout — an outer frame containing color-coded, labeled step nodes — in a single operation. Always include 4-8 specific, domain-relevant step labels. Never create empty flowcharts.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        title: { type: 'string' },
+        steps: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              label: { type: 'string', description: 'Step label text' },
+              type: { type: 'string', enum: ['start', 'process', 'decision', 'end'], description: 'Node type. Use start for the first step, end for the last, decision for branching, process for all others.' },
+            },
+            required: ['label'],
+          },
+          description: 'Ordered list of flowchart steps',
+        },
+        x: { type: 'number' },
+        y: { type: 'number' },
+      },
+      required: ['title', 'steps'],
+    },
+  },
+  {
+    name: 'batchModify',
+    description: 'Update or delete multiple objects in one call. Use when the user wants to move, resize, recolor, rotate, or delete ALL / several objects matching a description (e.g. "move all pink stickies to the left", "delete all blue rectangles", "change all stickies to green"). Call getBoardState first to collect the matching object IDs, then call this tool once. Never loop individual move/delete/changeColor calls for batch operations.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        objectIds: { type: 'array', items: { type: 'string' }, description: 'IDs of objects to modify' },
+        action: { type: 'string', enum: ['update', 'delete'], description: '"update" to change properties, "delete" to remove objects' },
+        updates: {
+          type: 'object',
+          properties: {
+            x: { type: 'number' },
+            y: { type: 'number' },
+            width: { type: 'number' },
+            height: { type: 'number' },
+            color: { type: 'string' },
+            rotation: { type: 'number' },
+            text: { type: 'string' },
+          },
+          description: 'Fields to update (only for action "update"). Only provided fields are changed.',
+        },
+      },
+      required: ['objectIds', 'action'],
+    },
+  },
 ]
 
 const SYSTEM_PROMPT = `You are an AI assistant that helps users modify a collaborative whiteboard in real time. You always act directly with tools — never ask the user for information.
@@ -230,6 +294,8 @@ CRITICAL RULES:
 - If the user asks to modify existing objects (move, resize, change color, delete, arrange, space evenly) and the inline board state is empty or missing, call getBoardState first to get the current objects.
 - If the user is asking about existing objects (counting, listing, describing — e.g. "how many objects", "what's on the board") and the inline board state is empty, always call getBoardState first before answering.
 - When size or position is not specified, make a reasonable choice (e.g. 1.5× current size for resize, place near x=100 y=100 for new objects).
+- NEVER ask the user to clarify color names or descriptions. When a user says "pink", act on any pinkish color on the board (e.g. #ff69b4, #fca5a5, #ff85a1, #ffb6c1, or any color with high red and moderate blue). When a user says "blue", match any blue-family color. Always pick the closest match and act immediately — do not ask "did you mean X?".
+- NEVER ask clarifying questions under any circumstances. If there is any ambiguity, make the most reasonable interpretation and act with tools.
 
 Object types: sticky, rect, circle, line, frame, connector, text.
 Positioning: x 100-1500, y 100-1000.
@@ -239,7 +305,15 @@ Use domain-appropriate content for templates:
 - Journey map: Awareness / Consideration / Purchase / Retention / Advocacy
 - Retrospective: What Went Well / What Didn't / Action Items
 
-Compound tools (createBulkObjects, createQuadrant, createColumnLayout, clearBoard) build the full layout server-side in one call. Use createBulkObjects for any request creating 3 or more objects of the same type — never call individual create tools in a loop for bulk requests. Prefer the other compound tools for templates and board resets.
+Compound tools (createBulkObjects, createQuadrant, createColumnLayout, createFlowchart, clearBoard) build the full layout server-side in one call. Use createBulkObjects for any request creating 3 or more objects of the same type — never call individual create tools in a loop for bulk requests. Prefer the other compound tools for templates and board resets.
+When using createQuadrant or createColumnLayout, always populate the items field with 2-3 domain-relevant entries per section. Never create empty templates.
+When using createFlowchart, always include 4-8 specific step labels relevant to the scenario. Use type "start" for the first node, "end" for the last, "decision" for branching points, and "process" for all others. Never create a flowchart with empty or placeholder steps.
+
+Color guidance:
+- When creating objects for concepts with positive/negative semantics (pros/cons, strengths/weaknesses, good/bad, do/don't), use green (#86efac) for positive items and red/pink (#fca5a5) for negative items.
+- When creating a grid of objects with distinct categories, use different colors for each category.
+
+Batch operations: when the user wants to move, delete, recolor, resize, or rotate ALL or SEVERAL objects matching a description (e.g. "move all pink stickies", "delete all blue rectangles", "change all stickies to green"), call getBoardState first to collect the matching IDs, then call batchModify once with all IDs. Never loop individual move/delete/changeColor calls for batch operations.
 
 For simple commands, make the change in a single tool call. Only call getBoardState when you need to identify specific existing objects by their id.`
 
@@ -261,13 +335,26 @@ type BoardObject = {
   font_color?: string
 }
 
+type PlacementObject = { id: string; x: number; y: number; width: number; height: number }
+
+const PLACEMENT_TOOL_NAMES = new Set([
+  'createStickyNote',
+  'createShape',
+  'createFrame',
+  'createText',
+  'createBulkObjects',
+  'createQuadrant',
+  'createColumnLayout',
+  'createFlowchart',
+])
+
 // ── Bulk object creator ─────────────────────────────────────────────────────
 
 async function executeCreateBulkObjects(
   supabase: ReturnType<typeof createClient>,
   boardId: string,
   input: Record<string, unknown>,
-  objectsForPlacement: { id: string; x: number; y: number; width: number; height: number }[],
+  objectsForPlacement: PlacementObject[],
   viewportBounds: { x: number; y: number; width: number; height: number } | null
 ): Promise<{ content: string; createdCenter: { x: number; y: number } }> {
   const objectType = String(input.objectType ?? 'sticky')
@@ -299,18 +386,20 @@ async function executeCreateBulkObjects(
   startY = resolvedY
 
   const rows: Record<string, unknown>[] = []
+  const placementAdds: PlacementObject[] = []
   for (let i = 0; i < count; i++) {
     const id = crypto.randomUUID()
     const label = items[i] ?? (topic ? `${topic} ${i + 1}` : `${objectType} ${i + 1}`)
 
     const x = startX + (i % columns) * cellW
     const y = startY + Math.floor(i / columns) * cellH
+    placementAdds.push({ id, x, y, width: w, height: h })
 
     const base = { board_id: boardId, id, type: objectType, x, y, width: w, height: h }
     switch (objectType) {
       case 'sticky': rows.push({ ...base, text: label, color }); break
-      case 'rect':
-      case 'circle': rows.push({ ...base, color }); break
+      case 'rect':   rows.push({ ...base, text: label, color }); break
+      case 'circle': rows.push({ ...base, text: label, color }); break
       case 'frame':  rows.push({ ...base, text: label, color }); break
       case 'text':   rows.push({ ...base, text: label, font_size: TEXT_DEFAULT_FONT_SIZE, font_color: color }); break
       default:       rows.push({ ...base, text: label, color }); break
@@ -319,6 +408,7 @@ async function executeCreateBulkObjects(
 
   const { error } = await supabase.from(TABLE).insert(rows)
   if (error) throw error
+  objectsForPlacement.push(...placementAdds)
   const content = `Created ${count} ${objectType} objects in a ${layout} layout`
   const createdCenter = { x: startX + layoutW / 2, y: startY + layoutH / 2 }
   return { content, createdCenter }
@@ -332,7 +422,7 @@ async function executeCreateQuadrant(
   supabase: ReturnType<typeof createClient>,
   boardId: string,
   input: Record<string, unknown>,
-  objectsForPlacement: { id: string; x: number; y: number; width: number; height: number }[],
+  objectsForPlacement: PlacementObject[],
   viewportBounds: { x: number; y: number; width: number; height: number } | null
 ): Promise<{ content: string; createdCenter: { x: number; y: number } }> {
   const title = String(input.title ?? 'Quadrant Diagram')
@@ -345,14 +435,17 @@ async function executeCreateQuadrant(
   const items = (input.items ?? {}) as Record<string, string[]>
 
   const created: string[] = []
+  const rows: Record<string, unknown>[] = []
+  const placementAdds: PlacementObject[] = []
 
   // Outer frame
   const frameId = crypto.randomUUID()
-  await supabase.from(TABLE).insert({
+  rows.push({
     board_id: boardId, id: frameId, type: 'frame',
     x: startX, y: startY, width: QUAD_OUTER_W, height: QUAD_OUTER_H,
     text: title, color: DEFAULT_FRAME_COLOR,
   })
+  placementAdds.push({ id: frameId, x: startX, y: startY, width: QUAD_OUTER_W, height: QUAD_OUTER_H })
   created.push(frameId)
 
   const quadrants = [
@@ -370,11 +463,12 @@ async function executeCreateQuadrant(
 
     // Inner frame — canvas renders colored header + dashed border automatically
     const innerId = crypto.randomUUID()
-    await supabase.from(TABLE).insert({
+    rows.push({
       board_id: boardId, id: innerId, type: 'frame',
       x: innerX, y: innerY, width: QUAD_INNER_W, height: QUAD_INNER_H,
       text: q.label, color: frameColor, parent_id: frameId,
     })
+    placementAdds.push({ id: innerId, x: innerX, y: innerY, width: QUAD_INNER_W, height: QUAD_INNER_H })
     created.push(innerId)
 
     // Stickies inside inner frame (grandchildren of outer frame)
@@ -388,14 +482,19 @@ async function executeCreateQuadrant(
       if (sy + QUAD_S_H > innerY + QUAD_INNER_H - QUAD_S_PAD) break
 
       const sId = crypto.randomUUID()
-      await supabase.from(TABLE).insert({
+      rows.push({
         board_id: boardId, id: sId, type: 'sticky',
         x: sx, y: sy, width: QUAD_S_W, height: QUAD_S_H,
         text: qItems[i], color: stickyColor, parent_id: innerId,
       })
+      placementAdds.push({ id: sId, x: sx, y: sy, width: QUAD_S_W, height: QUAD_S_H })
       created.push(sId)
     }
   }
+
+  const { error } = await supabase.from(TABLE).insert(rows)
+  if (error) throw error
+  objectsForPlacement.push(...placementAdds)
 
   const content = `Created quadrant diagram "${title}" with ${created.length} elements`
   const createdCenter = { x: startX + QUAD_OUTER_W / 2, y: startY + QUAD_OUTER_H / 2 }
@@ -407,7 +506,7 @@ async function executeCreateColumnLayout(
   supabase: ReturnType<typeof createClient>,
   boardId: string,
   input: Record<string, unknown>,
-  objectsForPlacement: { id: string; x: number; y: number; width: number; height: number }[],
+  objectsForPlacement: PlacementObject[],
   viewportBounds: { x: number; y: number; width: number; height: number } | null
 ): Promise<{ content: string; createdCenter: { x: number; y: number } }> {
   const title = String(input.title ?? 'Column Layout')
@@ -431,14 +530,17 @@ async function executeCreateColumnLayout(
   startY = resolvedY
 
   const created: string[] = []
+  const rows: Record<string, unknown>[] = []
+  const placementAdds: PlacementObject[] = []
 
   // Outer frame
   const frameId = crypto.randomUUID()
-  await supabase.from(TABLE).insert({
+  rows.push({
     board_id: boardId, id: frameId, type: 'frame',
     x: startX, y: startY, width: outerW, height: outerH,
     text: title, color: DEFAULT_FRAME_COLOR,
   })
+  placementAdds.push({ id: frameId, x: startX, y: startY, width: outerW, height: outerH })
   created.push(frameId)
 
   for (let i = 0; i < columns.length; i++) {
@@ -450,11 +552,12 @@ async function executeCreateColumnLayout(
 
     // Inner frame (column) — canvas renders colored header + dashed border automatically
     const innerId = crypto.randomUUID()
-    await supabase.from(TABLE).insert({
+    rows.push({
       board_id: boardId, id: innerId, type: 'frame',
       x: innerX, y: innerY, width: COL_INNER_W, height: innerH,
       text: col.name, color: frameColor, parent_id: frameId,
     })
+    placementAdds.push({ id: innerId, x: innerX, y: innerY, width: COL_INNER_W, height: innerH })
     created.push(innerId)
 
     // Stickies inside column (grandchildren of outer frame)
@@ -466,16 +569,105 @@ async function executeCreateColumnLayout(
       if (sy + COL_S_H > innerY + innerH - COL_S_PAD) break
 
       const sId = crypto.randomUUID()
-      await supabase.from(TABLE).insert({
+      rows.push({
         board_id: boardId, id: sId, type: 'sticky',
         x: sx, y: sy, width: COL_S_W, height: COL_S_H,
         text: colItems[j], color: stickyColor, parent_id: innerId,
       })
+      placementAdds.push({ id: sId, x: sx, y: sy, width: COL_S_W, height: COL_S_H })
       created.push(sId)
     }
   }
 
+  const { error } = await supabase.from(TABLE).insert(rows)
+  if (error) throw error
+  objectsForPlacement.push(...placementAdds)
+
   const content = `Created column layout "${title}" with ${created.length} elements`
+  const createdCenter = { x: startX + outerW / 2, y: startY + outerH / 2 }
+  return { content, createdCenter }
+}
+
+// Flowchart: outer frame containing colored rect nodes stacked vertically.
+// Node color encodes type: start=green, process=blue, decision=yellow, end=red.
+async function executeCreateFlowchart(
+  supabase: ReturnType<typeof createClient>,
+  boardId: string,
+  input: Record<string, unknown>,
+  objectsForPlacement: PlacementObject[],
+  viewportBounds: { x: number; y: number; width: number; height: number } | null
+): Promise<{ content: string; createdCenter: { x: number; y: number } }> {
+  const title = String(input.title ?? 'Flowchart')
+  const steps = Array.isArray(input.steps)
+    ? (input.steps as Array<{ label?: string; type?: string }>)
+    : []
+
+  const nodeCount = Math.max(steps.length, 1)
+  const outerW = FLOW_OUTER_PAD * 2 + FLOW_NODE_W
+  const outerH =
+    FLOW_OUTER_TITLE_H +
+    FLOW_OUTER_PAD +
+    nodeCount * FLOW_NODE_H +
+    (nodeCount - 1) * FLOW_NODE_GAP +
+    FLOW_OUTER_PAD
+
+  let startX = Number(input.x ?? 100)
+  let startY = Number(input.y ?? 100)
+  const { x: resolvedX, y: resolvedY } = resolveBulkPlacement(startX, startY, outerW, outerH, objectsForPlacement, 2, viewportBounds)
+  startX = resolvedX
+  startY = resolvedY
+
+  const rows: Record<string, unknown>[] = []
+  const placementAdds: PlacementObject[] = []
+  const created: string[] = []
+
+  // Outer frame
+  const frameId = crypto.randomUUID()
+  rows.push({
+    board_id: boardId, id: frameId, type: 'frame',
+    x: startX, y: startY, width: outerW, height: outerH,
+    text: title, color: DEFAULT_FRAME_COLOR,
+  })
+  placementAdds.push({ id: frameId, x: startX, y: startY, width: outerW, height: outerH })
+  created.push(frameId)
+
+  // Step nodes — collect IDs so connectors can reference them
+  const nodeIds: string[] = []
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i]
+    const nodeType = String(step.type ?? (i === 0 ? 'start' : i === steps.length - 1 ? 'end' : 'process'))
+    const label = String(step.label ?? `Step ${i + 1}`)
+    const color = FLOW_NODE_COLORS[nodeType] ?? FLOW_NODE_COLORS.process
+    const nx = startX + FLOW_OUTER_PAD
+    const ny = startY + FLOW_OUTER_TITLE_H + FLOW_OUTER_PAD + i * (FLOW_NODE_H + FLOW_NODE_GAP)
+    const nodeId = crypto.randomUUID()
+    rows.push({
+      board_id: boardId, id: nodeId, type: 'rect',
+      x: nx, y: ny, width: FLOW_NODE_W, height: FLOW_NODE_H,
+      text: label, color, parent_id: frameId,
+    })
+    placementAdds.push({ id: nodeId, x: nx, y: ny, width: FLOW_NODE_W, height: FLOW_NODE_H })
+    created.push(nodeId)
+    nodeIds.push(nodeId)
+  }
+
+  // Arrows connecting consecutive nodes (N-1 connectors for N steps)
+  for (let i = 0; i < nodeIds.length - 1; i++) {
+    const connId = crypto.randomUUID()
+    rows.push({
+      board_id: boardId, id: connId, type: 'connector',
+      from_id: nodeIds[i], to_id: nodeIds[i + 1],
+      style: 'arrow', color: DEFAULT_CONNECTOR_COLOR,
+      x: 0, y: 0, width: 0, height: 0,
+    })
+    created.push(connId)
+  }
+
+  const { error } = await supabase.from(TABLE).insert(rows)
+  if (error) throw error
+  objectsForPlacement.push(...placementAdds)
+
+  const content = `Created flowchart "${title}" with ${steps.length} steps and ${nodeIds.length - 1} arrows`
   const createdCenter = { x: startX + outerW / 2, y: startY + outerH / 2 }
   return { content, createdCenter }
 }
@@ -489,7 +681,7 @@ async function executeTool(
   boardId: string,
   name: string,
   input: Record<string, unknown>,
-  placementObjects: { id: string; x: number; y: number; width: number; height: number }[],
+  placementObjects: PlacementObject[],
   viewportBounds: { x: number; y: number; width: number; height: number } | null
 ): Promise<ToolResult> {
   const cols = 'id,type,x,y,width,height,text,color,rotation,parent_id,from_id,to_id,style,font_size,font_color'
@@ -517,6 +709,7 @@ async function executeTool(
         const y = Number(input.y ?? 100)
         const { x: px, y: py } = resolvePlacement({ x, y, width: STICKY_WIDTH, height: STICKY_HEIGHT }, objectsForPlacement, viewportBounds, 2)
         await supabase.from(TABLE).insert({ board_id: boardId, id, type: 'sticky', x: px, y: py, width: STICKY_WIDTH, height: STICKY_HEIGHT, text: input.text ?? '', color: input.color ?? DEFAULT_STICKY_COLOR })
+        objectsForPlacement.push({ id, x: px, y: py, width: STICKY_WIDTH, height: STICKY_HEIGHT })
         return { content: `Created sticky note with id ${id}`, createdCenter: { x: px, y: py } }
       }
 
@@ -529,6 +722,7 @@ async function executeTool(
         const y = Number(input.y ?? 100)
         const { x: px, y: py } = resolvePlacement({ x, y, width: w, height: h }, objectsForPlacement, viewportBounds, 2)
         await supabase.from(TABLE).insert({ board_id: boardId, id, type: t, x: px, y: py, width: w, height: h, color: input.color ?? DEFAULT_SHAPE_COLOR })
+        objectsForPlacement.push({ id, x: px, y: py, width: Number(w), height: Number(h) })
         return { content: `Created ${t} with id ${id}`, createdCenter: { x: px, y: py } }
       }
 
@@ -540,6 +734,7 @@ async function executeTool(
         const y = Number(input.y ?? 100)
         const { x: px, y: py } = resolvePlacement({ x, y, width: w, height: h }, objectsForPlacement, viewportBounds, 2)
         await supabase.from(TABLE).insert({ board_id: boardId, id, type: 'frame', x: px, y: py, width: w, height: h, text: input.title ?? 'Frame', color: input.color ?? DEFAULT_FRAME_COLOR })
+        objectsForPlacement.push({ id, x: px, y: py, width: w, height: h })
         return { content: `Created frame with id ${id}`, createdCenter: { x: px, y: py } }
       }
 
@@ -557,16 +752,31 @@ async function executeTool(
         const y = Number(input.y ?? 100)
         const { x: px, y: py } = resolvePlacement({ x, y, width: tw, height: th }, objectsForPlacement, viewportBounds, 2)
         await supabase.from(TABLE).insert({ board_id: boardId, id, type: 'text', x: px, y: py, width: tw, height: th, text: input.text ?? '', font_size: input.fontSize ?? TEXT_DEFAULT_FONT_SIZE, font_color: input.fontColor ?? DEFAULT_TEXT_COLOR })
+        objectsForPlacement.push({ id, x: px, y: py, width: tw, height: th })
         return { content: `Created text with id ${id}`, createdCenter: { x: px, y: py } }
       }
 
-      case 'moveObject':
+      case 'moveObject': {
         await supabase.from(TABLE).update({ x: input.x, y: input.y, updated_at: new Date().toISOString() }).eq('board_id', boardId).eq('id', input.objectId)
+        const idx = objectsForPlacement.findIndex((o) => o.id === String(input.objectId ?? ''))
+        if (idx >= 0) {
+          objectsForPlacement[idx] = { ...objectsForPlacement[idx], x: Number(input.x ?? objectsForPlacement[idx].x), y: Number(input.y ?? objectsForPlacement[idx].y) }
+        }
         return 'Moved'
+      }
 
-      case 'resizeObject':
+      case 'resizeObject': {
         await supabase.from(TABLE).update({ width: input.width, height: input.height, updated_at: new Date().toISOString() }).eq('board_id', boardId).eq('id', input.objectId)
+        const idx = objectsForPlacement.findIndex((o) => o.id === String(input.objectId ?? ''))
+        if (idx >= 0) {
+          objectsForPlacement[idx] = {
+            ...objectsForPlacement[idx],
+            width: Number(input.width ?? objectsForPlacement[idx].width),
+            height: Number(input.height ?? objectsForPlacement[idx].height),
+          }
+        }
         return 'Resized'
+      }
 
       case 'rotateObject':
         await supabase.from(TABLE).update({ rotation: input.rotation ?? 0, updated_at: new Date().toISOString() }).eq('board_id', boardId).eq('id', input.objectId)
@@ -582,6 +792,10 @@ async function executeTool(
 
       case 'deleteObject':
         await supabase.from(TABLE).delete().eq('board_id', boardId).eq('id', input.objectId)
+        {
+          const idx = objectsForPlacement.findIndex((o) => o.id === String(input.objectId ?? ''))
+          if (idx >= 0) objectsForPlacement.splice(idx, 1)
+        }
         return 'Deleted'
 
       case 'arrangeInGrid': {
@@ -611,6 +825,51 @@ async function executeTool(
 
       case 'createColumnLayout':
         return await executeCreateColumnLayout(supabase, boardId, input, objectsForPlacement, viewportBounds)
+
+      case 'createFlowchart':
+        return await executeCreateFlowchart(supabase, boardId, input, objectsForPlacement, viewportBounds)
+
+      case 'batchModify': {
+        const ids = Array.isArray(input.objectIds) ? (input.objectIds as string[]) : []
+        if (ids.length === 0) return 'No object IDs provided'
+        const action = String(input.action ?? 'update')
+
+        if (action === 'delete') {
+          const { error } = await supabase.from(TABLE).delete().eq('board_id', boardId).in('id', ids)
+          if (error) throw error
+          for (const delId of ids) {
+            const idx = objectsForPlacement.findIndex((o) => o.id === delId)
+            if (idx >= 0) objectsForPlacement.splice(idx, 1)
+          }
+          return `Deleted ${ids.length} objects`
+        }
+
+        const updates = (input.updates ?? {}) as Record<string, unknown>
+        const fields: Record<string, unknown> = { updated_at: new Date().toISOString() }
+        if (updates.x != null) fields.x = Number(updates.x)
+        if (updates.y != null) fields.y = Number(updates.y)
+        if (updates.width != null) fields.width = Number(updates.width)
+        if (updates.height != null) fields.height = Number(updates.height)
+        if (updates.color != null) fields.color = String(updates.color)
+        if (updates.rotation != null) fields.rotation = Number(updates.rotation)
+        if (updates.text != null) fields.text = String(updates.text)
+
+        const { error } = await supabase.from(TABLE).update(fields).eq('board_id', boardId).in('id', ids)
+        if (error) throw error
+
+        for (const id of ids) {
+          const idx = objectsForPlacement.findIndex((o) => o.id === id)
+          if (idx >= 0) {
+            if (fields.x != null) objectsForPlacement[idx].x = fields.x as number
+            if (fields.y != null) objectsForPlacement[idx].y = fields.y as number
+            if (fields.width != null) objectsForPlacement[idx].width = fields.width as number
+            if (fields.height != null) objectsForPlacement[idx].height = fields.height as number
+          }
+        }
+
+        const changedFields = Object.keys(updates).filter((k) => updates[k] != null)
+        return `Updated ${ids.length} objects (${changedFields.join(', ')})`
+      }
 
       case 'clearBoard': {
         const { error } = await supabase.from(TABLE).delete().eq('board_id', boardId)
@@ -648,12 +907,26 @@ function getFriendlySummary(
       return input.text ? `Text added: "${input.text}"` : 'Text added'
     case 'createConnector':
       return 'Connector added'
+    case 'moveObject':
+      return 'Moved'
+    case 'resizeObject':
+      return 'Resized'
+    case 'rotateObject':
+      return input.rotation != null ? `Rotated to ${input.rotation}°` : 'Rotated'
+    case 'updateText':
+      return input.newText ? `Text updated to "${input.newText}"` : 'Text updated'
+    case 'changeColor':
+      return input.color ? `Color changed to ${input.color}` : 'Color changed'
+    case 'deleteObject':
+      return 'Deleted'
     // Compound tools already return clean summaries
     case 'createBulkObjects':
     case 'createQuadrant':
     case 'createColumnLayout':
+    case 'createFlowchart':
     case 'clearBoard':
     case 'arrangeInGrid':
+    case 'batchModify':
       return rawResult
     default:
       // Strip anything that looks like a raw UUID to avoid leaking internals
@@ -709,6 +982,28 @@ Deno.serve(async (req) => {
   // When boardStateForPlacementOnly is true (e.g. bulk create), use minimal board state in the prompt to avoid tokens/latency; placement still uses full currentObjects.
   const objectsForPrompt = boardStateForPlacementOnly ? [] : (currentObjects ?? [])
   const boardStateJson = JSON.stringify(objectsForPrompt)
+  let placementObjects: PlacementObject[] = (currentObjects ?? [])
+    .slice(0, 200)
+    .map((o) => ({
+      id: o.id,
+      x: Number(o.x ?? 0),
+      y: Number(o.y ?? 0),
+      width: Number(o.width ?? 0),
+      height: Number(o.height ?? 0),
+    }))
+  let didLoadPlacementFromDb = false
+  const ensurePlacementObjects = async () => {
+    if (placementObjects.length > 0 || didLoadPlacementFromDb) return
+    didLoadPlacementFromDb = true
+    const { data: placementRows } = await supabase.from(TABLE).select('id,x,y,width,height').eq('board_id', boardId).limit(201)
+    placementObjects = (placementRows ?? []).slice(0, 200).map((r: { id: string; x: number; y: number; width?: number; height?: number }) => ({
+      id: r.id,
+      x: r.x,
+      y: r.y,
+      width: r.width ?? 0,
+      height: r.height ?? 0,
+    }))
+  }
   const messages: { role: string; content: string | unknown[] }[] = [
     { role: 'user', content: `Current board state:\n${boardStateJson}\n\nUser request: ${userMessage}` },
   ]
@@ -763,17 +1058,10 @@ Deno.serve(async (req) => {
       content: '',
     }))
 
-    // Fresh DB state for placement so bulk/single create avoid overlap with current board
-    const { data: placementRows } = await supabase.from(TABLE).select('id,x,y,width,height').eq('board_id', boardId).limit(201)
-    const placementObjects = (placementRows ?? []).slice(0, 200).map((r: { id: string; x: number; y: number; width?: number; height?: number }) => ({
-      id: r.id,
-      x: r.x,
-      y: r.y,
-      width: r.width ?? 0,
-      height: r.height ?? 0,
-    }))
-
     for (let i = 0; i < toolUseBlocks.length; i++) {
+      if (PLACEMENT_TOOL_NAMES.has(toolUseBlocks[i].name)) {
+        await ensurePlacementObjects()
+      }
       const result = await executeTool(supabase, boardId, toolUseBlocks[i].name, (toolUseBlocks[i].input as Record<string, unknown>) ?? {}, placementObjects, viewportBounds)
       const content = typeof result === 'object' ? result.content : result
       const createdCenter = typeof result === 'object' ? result.createdCenter : undefined
@@ -781,9 +1069,16 @@ Deno.serve(async (req) => {
       if (createdCenter) lastCreatedCenter = createdCenter
     }
 
-    if (policy.returnAfterToolExecution) {
+    // Only return early if ALL executed tools were mutations (not getBoardState).
+    // If Claude called getBoardState first, we must continue so it can act on the result.
+    const executedOnlyLookups = toolUseBlocks.every((tb) => tb.name === 'getBoardState')
+    if (policy.returnAfterToolExecution && !executedOnlyLookups) {
       const summary = toolUseBlocks
-        .map((tb, i) => getFriendlySummary(tb.name, tb.input as Record<string, unknown>, toolResults[i].content))
+        .filter((tb) => tb.name !== 'getBoardState')
+        .map((tb, i) => {
+          const resultIdx = toolUseBlocks.indexOf(tb)
+          return getFriendlySummary(tb.name, tb.input as Record<string, unknown>, toolResults[resultIdx].content)
+        })
         .filter(Boolean)
         .join('\n')
         .trim()

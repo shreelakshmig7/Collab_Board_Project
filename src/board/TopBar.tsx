@@ -13,9 +13,23 @@ type TopBarProps = {
   isShared?: boolean
   /** Opens the Share modal. Only shown when boardTitle is present. */
   onShareClick?: () => void
+  /** Disable backdrop blur while a modal is open to avoid blur nesting overdraw. */
+  disableGlassBlur?: boolean
+  /** Use dark/transparent theme (for the dashboard over dark gradient backgrounds). */
+  dark?: boolean
 }
 
-export default function TopBar({ presenceNames, onSignOut, boardTitle, onBackToBoards, onClearBoard, isShared = false, onShareClick }: TopBarProps) {
+export default function TopBar({
+  presenceNames,
+  onSignOut,
+  boardTitle,
+  onBackToBoards,
+  onClearBoard,
+  isShared = false,
+  onShareClick,
+  disableGlassBlur = false,
+  dark = false,
+}: TopBarProps) {
   const [showPresenceDropdown, setShowPresenceDropdown] = useState(false)
   const [showClearModal, setShowClearModal] = useState(false)
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('online')
@@ -58,18 +72,22 @@ export default function TopBar({ presenceNames, onSignOut, boardTitle, onBackToB
 
   return (
     <>
-      <header className="relative z-[100] flex items-center justify-between px-5 py-3 bg-white/95 backdrop-blur-sm border-b border-gray-200/80 shadow-sm">
+      <header className={`relative z-[100] flex items-center justify-between px-5 py-3 will-change-transform ${
+        dark
+          ? 'bg-transparent border-b border-white/[0.08]'
+          : `bg-white/70 border-b border-white/30 shadow-lg rounded-b-xl ${(disableGlassBlur || showClearModal) ? '' : 'backdrop-blur-md'}`
+      }`}>
         <div className="flex items-center gap-3">
           {onBackToBoards && (
             <button
               type="button"
               onClick={onBackToBoards}
-              className="text-sm text-gray-600 hover:text-gray-800 font-medium focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus:outline-none rounded"
+              className={`text-sm font-medium focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus:outline-none rounded ${dark ? 'text-white/60 hover:text-white' : 'text-gray-600 hover:text-gray-800'}`}
             >
               ← Boards
             </button>
           )}
-          <span className="font-semibold text-xl text-gray-800 tracking-tight">
+          <span className={`font-semibold text-xl tracking-tight ${dark ? 'text-white' : 'text-gray-800'}`}>
             {boardTitle ?? 'CollabBoard'}
           </span>
           {boardTitle != null && (
@@ -122,23 +140,23 @@ export default function TopBar({ presenceNames, onSignOut, boardTitle, onBackToB
           <span className="w-2.5 h-2.5 rounded-full bg-green-500 shrink-0" aria-hidden />
           <button
             type="button"
-            className="text-sm text-gray-500 font-medium hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100 cursor-default focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus:outline-none"
+            className={`text-sm font-medium px-2 py-1 rounded cursor-default focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus:outline-none ${dark ? 'text-white/60 hover:text-white/90 hover:bg-white/[0.08]' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'}`}
           >
             {label}
           </button>
           {showPresenceDropdown && (
             <div
               data-presence-dropdown
-              className="absolute right-0 top-full mt-1 py-2 min-w-[160px] max-h-[70vh] overflow-y-auto bg-white border border-gray-200 rounded-xl shadow-xl z-[99999]"
+              className={`absolute right-0 top-full mt-1 py-2 min-w-[160px] max-h-[70vh] overflow-y-auto backdrop-blur-md border rounded-xl shadow-xl z-[99999] ${dark ? 'bg-slate-800/90 border-white/10' : 'bg-white/40 border-white/20'}`}
               role="listbox"
             >
               {count === 0 ? (
-                <div className="px-4 py-2 text-sm text-gray-500">No one else online</div>
+                <div className={`px-4 py-2 text-sm ${dark ? 'text-white/50' : 'text-gray-500'}`}>No one else online</div>
               ) : (
                 presenceNames.map((name) => (
                   <div
                     key={name}
-                    className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                    className={`px-4 py-2 text-sm rounded-lg mx-1 ${dark ? 'text-white/80 hover:bg-white/10' : 'text-gray-700 hover:bg-white/30'}`}
                     role="option"
                   >
                     {name}
@@ -151,7 +169,7 @@ export default function TopBar({ presenceNames, onSignOut, boardTitle, onBackToB
         <button
           type="button"
           onClick={() => (onSignOut ? onSignOut() : signOut())}
-          className="px-4 py-2 text-sm font-medium cursor-pointer bg-gray-100 text-gray-700 border border-gray-200 rounded-xl hover:bg-gray-200 active:scale-[0.98] transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus:outline-none"
+          className={`px-4 py-2 text-sm font-medium cursor-pointer border rounded-xl active:scale-[0.98] transition-all duration-200 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus:outline-none ${dark ? 'text-white/80 border-white/20 hover:bg-white/10' : 'bg-white/20 border-white/30 hover:bg-white/30'}`}
         >
           Sign out
         </button>
@@ -189,7 +207,7 @@ export default function TopBar({ presenceNames, onSignOut, boardTitle, onBackToB
           aria-modal="true"
           aria-labelledby="clear-modal-title"
         >
-          <div className="bg-white rounded-2xl shadow-xl p-6 max-w-sm w-full mx-4">
+          <div className="bg-white/40 backdrop-blur-md border border-white/20 rounded-2xl shadow-2xl p-6 max-w-sm w-full mx-4">
             <h2 id="clear-modal-title" className="text-lg font-semibold text-gray-800 mb-2">
               Clear board?
             </h2>
@@ -200,7 +218,7 @@ export default function TopBar({ presenceNames, onSignOut, boardTitle, onBackToB
               <button
                 type="button"
                 onClick={() => setShowClearModal(false)}
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-xl hover:bg-gray-200 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus:outline-none"
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white/20 border border-white/30 rounded-xl hover:bg-white/30 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus:outline-none transition-all duration-200"
               >
                 Cancel
               </button>

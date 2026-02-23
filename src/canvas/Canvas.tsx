@@ -72,6 +72,9 @@ type CanvasProps = {
   onSelectionDragEnd?: () => void
   /** Called when user clicks empty canvas (e.g. to deselect Select tool). */
   onEmptyCanvasClick?: () => void
+  /** Context menu actions (right-click on object). */
+  onDuplicate?: () => void
+  onDelete?: () => void
   isViewOnly?: boolean
 }
 
@@ -113,13 +116,17 @@ export default function Canvas({
   onSelectionDragMove,
   onSelectionDragEnd,
   onEmptyCanvasClick,
+  onDuplicate,
+  onDelete,
   isViewOnly = false,
 }: CanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const stageRef = useRef<Konva.Stage>(null)
   const transformerRef = useRef<Konva.Transformer>(null)
+  const contextMenuRef = useRef<HTMLDivElement>(null)
   const lastCursorRef = useRef<number>(0)
   const [size, setSize] = useState({ width: 800, height: 600 })
+  const [contextMenu, setContextMenu] = useState<{ clientX: number; clientY: number; objectId: string } | null>(null)
   const [stagePos, setStagePos] = useState({ x: 0, y: 0 })
   const [stageScale, setStageScale] = useState(1)
   const posRef = useRef(stagePos)
@@ -711,6 +718,41 @@ export default function Canvas({
     panStartRef.current = null
   }
 
+  const handleStageContextMenu = useCallback(
+    (e: Konva.KonvaEventObject<MouseEvent>) => {
+      e.evt.preventDefault()
+      setContextMenu(null)
+      onSelect([])
+    },
+    [onSelect]
+  )
+
+  const handleObjectContextMenu = useCallback(
+    (id: string, clientX: number, clientY: number) => {
+      onSelect([id])
+      setContextMenu({ clientX, clientY, objectId: id })
+    },
+    [onSelect]
+  )
+
+  useEffect(() => {
+    if (!contextMenu) return
+    const handleClickOutside = (e: MouseEvent) => {
+      if (contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node)) {
+        setContextMenu(null)
+      }
+    }
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setContextMenu(null)
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    document.addEventListener('keydown', handleEscape)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('keydown', handleEscape)
+    }
+  }, [contextMenu])
+
   const handleStageClick = (e: Konva.KonvaEventObject<MouseEvent>) => {
     const stage = e.target.getStage()
     if (!stage) return
@@ -817,7 +859,10 @@ export default function Canvas({
   }, [objects, selectedIds])
 
   return (
-    <div ref={containerRef} className="w-full h-full bg-gray-100 relative">
+    <div
+      ref={containerRef}
+      className="w-full h-full relative bg-violet-50"
+    >
       <Stage
         ref={stageRef}
         width={size.width}
@@ -847,12 +892,14 @@ export default function Canvas({
             listening={true}
             onClick={handleStageClick}
             onTap={handleStageClick}
+            onContextMenu={handleStageContextMenu}
           />
           <BoardObjects
             boardId={boardId}
             objects={objects}
             selectedIds={selectedIds}
             onObjectClick={handleObjectClick}
+            onObjectContextMenu={isViewOnly ? undefined : handleObjectContextMenu}
             onStartEditText={onStartEditText}
             onObjectMoved={onObjectMoved}
             onObjectParentChange={onObjectParentChange}
@@ -869,6 +916,13 @@ export default function Canvas({
             ref={transformerRef}
             rotateEnabled={true}
             rotationSnaps={[0, 45, 90, 135, 180, 225, 270, 315]}
+            borderStroke="#2563eb"
+            borderStrokeWidth={2}
+            borderDash={[6, 4]}
+            anchorStroke="#2563eb"
+            anchorFill="#ffffff"
+            anchorSize={8}
+            anchorCornerRadius={2}
             boundBoxFunc={(oldBox, newBox) => {
               // Prevent resizing to zero. Use AND so connectors (lines with thin bbox) can resize.
               const minSize = MIN_OBJECT_SIZE
@@ -923,6 +977,45 @@ export default function Canvas({
           Select target node
         </div>
       )}
+
+      {/* Right-click context menu */}
+      {contextMenu && (onDuplicate || onDelete) && (
+        <div
+          ref={contextMenuRef}
+          className="fixed z-[100] min-w-[140px] py-1 bg-white/95 backdrop-blur-md border border-white/20 rounded-xl shadow-xl"
+          style={{ left: contextMenu.clientX, top: contextMenu.clientY }}
+          role="menu"
+          aria-label="Object actions"
+        >
+          {onDuplicate && (
+            <button
+              type="button"
+              onClick={() => {
+                onDuplicate()
+                setContextMenu(null)
+              }}
+              className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-white/60 focus:bg-white/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-inset rounded-t-xl first:rounded-t-xl last:rounded-b-xl"
+              role="menuitem"
+            >
+              Duplicate
+            </button>
+          )}
+          {onDelete && (
+            <button
+              type="button"
+              onClick={() => {
+                onDelete()
+                setContextMenu(null)
+              }}
+              className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 focus:bg-red-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-inset rounded-b-xl last:rounded-b-xl"
+              role="menuitem"
+            >
+              Delete
+            </button>
+          )}
+        </div>
+      )}
+
       {editBounds && (
         <>
           <div

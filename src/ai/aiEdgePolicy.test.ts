@@ -59,6 +59,30 @@ describe('ai-command edge policy', () => {
     expect(p.forcedToolName).toBe('createColumnLayout')
   })
 
+  it('routes flowchart to compound: smart, 1 turn, createFlowchart forced, no getBoardState', () => {
+    const p = getPolicyForMessage('Create a flowchart for user onboarding')
+    expect(p.modelTier).toBe('smart')
+    expect(p.maxTurns).toBe(1)
+    expect(p.forcedToolName).toBe('createFlowchart')
+    expect(p.allowGetBoardState).toBe(false)
+    expect(p.returnAfterToolExecution).toBe(true)
+  })
+
+  it('routes flow chart (two words) to createFlowchart', () => {
+    const p = getPolicyForMessage('Make a flow chart for the checkout process')
+    expect(p.forcedToolName).toBe('createFlowchart')
+  })
+
+  it('routes flow diagram to createFlowchart', () => {
+    const p = getPolicyForMessage('Draw a flow diagram for incident response')
+    expect(p.forcedToolName).toBe('createFlowchart')
+  })
+
+  it('routes process flow to createFlowchart', () => {
+    const p = getPolicyForMessage('Create a process flow for customer support')
+    expect(p.forcedToolName).toBe('createFlowchart')
+  })
+
   it('routes clear board to compound: clearBoard forced, 1 turn', () => {
     const p = getPolicyForMessage('Clear the board')
     expect(p.modelTier).toBe('smart')
@@ -79,12 +103,12 @@ describe('ai-command edge policy', () => {
   })
 
   // ── Ops path (now complex, not simple) ───────────────────────────────────
-  it('routes move to smart tier with getBoardState (not simple)', () => {
+  it('routes move to smart tier with getBoardState, returnAfterToolExecution: true', () => {
     const p = getPolicyForMessage('Move the sticky note to the right')
     expect(p.modelTier).toBe('smart')
     expect(p.allowGetBoardState).toBe(true)
     expect(p.maxTurns).toBe(3)
-    expect(p.returnAfterToolExecution).toBe(false)
+    expect(p.returnAfterToolExecution).toBe(true)
     expect(p.forcedToolName).toBeUndefined()
   })
 
@@ -105,6 +129,23 @@ describe('ai-command edge policy', () => {
     const p = getPolicyForMessage('Resize the rectangle')
     expect(p.modelTier).toBe('smart')
     expect(p.allowGetBoardState).toBe(true)
+  })
+
+  // ── Creation grid path ───────────────────────────────────────────────────
+  it('routes "create a 2x3 grid of sticky notes" to smart, 2 turns, returnAfterToolExecution', () => {
+    const p = getPolicyForMessage('Create a 2x3 grid of sticky notes for pros and cons')
+    expect(p.modelTier).toBe('smart')
+    expect(p.maxTurns).toBe(2)
+    expect(p.allowGetBoardState).toBe(false)
+    expect(p.returnAfterToolExecution).toBe(true)
+    expect(p.forcedToolName).toBeUndefined()
+  })
+
+  it('routes "make a grid of rectangles" to creation grid path', () => {
+    const p = getPolicyForMessage('Make a grid of rectangles for the team')
+    expect(p.modelTier).toBe('smart')
+    expect(p.maxTurns).toBe(2)
+    expect(p.returnAfterToolExecution).toBe(true)
   })
 
   // ── Generic complex path ─────────────────────────────────────────────────

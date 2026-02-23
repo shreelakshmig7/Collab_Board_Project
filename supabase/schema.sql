@@ -142,6 +142,9 @@ ALTER TABLE board_objects ADD COLUMN IF NOT EXISTS from_y DOUBLE PRECISION;
 ALTER TABLE board_objects ADD COLUMN IF NOT EXISTS to_x DOUBLE PRECISION;
 ALTER TABLE board_objects ADD COLUMN IF NOT EXISTS to_y DOUBLE PRECISION;
 
+-- Z-index for layering: controls Konva render order (higher = on top)
+ALTER TABLE board_objects ADD COLUMN IF NOT EXISTS z_index INTEGER NOT NULL DEFAULT 0;
+
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Board sharing: board_members (owner/editor), public_access_level, share_slug
 -- Run in Supabase SQL Editor. Option B: owner lives in board_members.

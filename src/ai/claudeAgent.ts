@@ -27,14 +27,23 @@ export async function runAICommand(
     return { text: '', error: 'Supabase not configured' }
   }
 
-  // Refresh session to avoid "expired" errors — must run before fetching a fresh token
-  const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession()
+  // Use existing session if token is still fresh (expires more than 60s from now).
+  // Only refresh when close to expiry — avoids a needless Auth round-trip on every command.
+  const { data: existingSessionData } = await supabase.auth.getSession()
+  const existingSession = existingSessionData?.session
+  const expiresAt = existingSession?.expires_at ?? 0
+  const secondsUntilExpiry = expiresAt - Math.floor(Date.now() / 1000)
+  const needsRefresh = !existingSession?.access_token || secondsUntilExpiry < 60
 
-  if (refreshError) {
-    return { text: '', error: `Session error: ${refreshError.message}. Try signing out and back in.` }
+  let session = existingSession
+  if (needsRefresh) {
+    const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession()
+    if (refreshError) {
+      return { text: '', error: `Session error: ${refreshError.message}. Try signing out and back in.` }
+    }
+    session = refreshData?.session ?? (await supabase.auth.getSession()).data?.session
   }
 
-  const session = refreshData?.session ?? (await supabase.auth.getSession()).data?.session
   if (!session?.access_token) {
     return { text: '', error: 'Session expired. Please sign out and sign in again to use AI.' }
   }
@@ -62,16 +71,30 @@ export async function runAICommand(
     /\b(how many|count|list|what|describe|show me|tell me)\b/i.test(messageLC) &&
     /\b(objects?|sticky|stickies|frame|frames|shape|shapes|note|notes|board|canvas|rect|circle|text)\b/i.test(messageLC)
 
+  // Ops on small boards: send board state inline so Claude can act in 1 Sonnet turn
+  // without a getBoardState round-trip. Threshold of 25 keeps input tokens manageable.
+  // Ops on large boards (>25): send nothing — Claude calls getBoardState server-side.
+  const OPS_INLINE_THRESHOLD = 25
+  const isSmallBoard = currentObjects.length <= OPS_INLINE_THRESHOLD
   const objectsToSend: BoardObject[] =
-    isComplexCommand || isCreationCommand || isObjectRefCommand || isQueryCommand
+    isComplexCommand || isCreationCommand || isQueryCommand
       ? currentObjects
-      : []
+      : isObjectRefCommand && isSmallBoard
+        ? currentObjects
+        : []
+
+  // Simple single-object creation doesn't need board state in the Claude prompt —
+  // the forced tool only needs x/y which resolvePlacement handles server-side.
+  // Strip from prompt (but keep for placement) to reduce input tokens and latency.
+  const isSimpleCreation =
+    isCreationCommand && !isBulkCreation && !isComplexCommand && !isObjectRefCommand && !isQueryCommand
+  const boardStateForPlacementOnly = isBulkCreation || isSimpleCreation
 
   const body = JSON.stringify({
     userMessage: userMessage.trim(),
     currentObjects: objectsToSend,
     boardId,
-    ...(isBulkCreation ? { boardStateForPlacementOnly: true } : {}),
+    ...(boardStateForPlacementOnly ? { boardStateForPlacementOnly: true } : {}),
     ...(viewport?.bounds && typeof viewport.bounds.x === 'number' && typeof viewport.bounds.width === 'number'
       ? { viewport: { bounds: viewport.bounds } }
       : {}),

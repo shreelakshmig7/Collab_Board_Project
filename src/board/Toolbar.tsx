@@ -26,7 +26,15 @@ type ToolbarProps = {
   onResize: (width: number, height: number) => void
   onDuplicate: () => void
   onDelete: () => void
+  onUndo?: () => void
+  onRedo?: () => void
+  canUndo?: boolean
+  canRedo?: boolean
+  onBringToFront?: () => void
+  onSendToBack?: () => void
   isViewOnly?: boolean
+  /** Disable backdrop blur while modal overlays are open to avoid blur nesting. */
+  disableGlassBlur?: boolean
 }
 
 function clampSize(val: number): number {
@@ -34,10 +42,10 @@ function clampSize(val: number): number {
 }
 
 function toolBtn(active: boolean) {
-  return `px-3 py-1.5 text-sm rounded-md border cursor-pointer transition-colors focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 focus:outline-none ${
+  return `px-3 py-1.5 text-sm rounded-lg border-2 cursor-pointer transition-all duration-200 focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-1 focus:outline-none ${
     active
-      ? 'font-semibold bg-blue-100 border-blue-300 text-blue-800'
-      : 'font-normal bg-gray-100 border-gray-200 hover:bg-gray-200 text-gray-700'
+      ? 'font-semibold bg-blue-500/20 border-blue-400 text-blue-300 shadow-sm ring-2 ring-blue-400/40'
+      : 'font-normal bg-white/[0.06] border-white/10 hover:bg-white/[0.14] hover:border-white/20 text-white/80'
   }`
 }
 
@@ -62,7 +70,14 @@ export default function Toolbar({
   onResize,
   onDuplicate,
   onDelete,
+  onUndo,
+  onRedo,
+  canUndo = false,
+  canRedo = false,
+  onBringToFront,
+  onSendToBack,
   isViewOnly = false,
+  disableGlassBlur = false,
 }: ToolbarProps) {
   const [localWidth, setLocalWidth] = useState('')
   const [localHeight, setLocalHeight] = useState('')
@@ -82,8 +97,8 @@ export default function Toolbar({
 
   if (isViewOnly) {
     return (
-      <div className="flex items-center gap-3 px-4 py-2 border-b border-gray-200 bg-gray-50">
-        <span className="text-sm font-medium text-gray-500">View only</span>
+      <div className={`flex items-center gap-3 px-4 py-2 bg-purple-950/60 border-b border-white/[0.08] shadow-lg rounded-b-xl min-h-[48px] will-change-transform ${disableGlassBlur ? '' : 'backdrop-blur-md'}`}>
+        <span className="text-sm font-medium text-white/50">View only</span>
       </div>
     )
   }
@@ -117,7 +132,35 @@ export default function Toolbar({
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-2 px-4 py-2 bg-white border-b border-gray-200 min-h-[48px]">
+    <div className={`flex flex-wrap items-center gap-2 px-4 py-2 bg-purple-950/60 border-b border-white/[0.08] shadow-lg rounded-b-xl min-h-[48px] will-change-transform ${disableGlassBlur ? '' : 'backdrop-blur-md'}`}>
+      {/* Undo / Redo */}
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          onClick={onUndo}
+          disabled={!canUndo}
+          title="Undo (Ctrl+Z)"
+          aria-label="Undo"
+          className="flex items-center justify-center w-8 h-8 rounded-lg border-2 border-white/10 bg-white/[0.06] text-white/70 hover:bg-white/[0.14] disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-200 focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-1 focus:outline-none"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M3 7v6h6" /><path d="M3 13C5.5 7.5 11 5 16 5c3 0 5.5 1 7 3" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          onClick={onRedo}
+          disabled={!canRedo}
+          title="Redo (Ctrl+Y)"
+          aria-label="Redo"
+          className="flex items-center justify-center w-8 h-8 rounded-lg border-2 border-white/10 bg-white/[0.06] text-white/70 hover:bg-white/[0.14] disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-200 focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-1 focus:outline-none"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M21 7v6h-6" /><path d="M21 13C18.5 7.5 13 5 8 5c-3 0-5.5 1-7 3" />
+          </svg>
+        </button>
+      </div>
+      <div className="h-6 w-px bg-white/[0.12]" />
       <button type="button" onClick={() => onToolChange('select')} className={toolBtn(activeTool === 'select')} title="Select tool: click objects to select; Shift+click to add to selection">
         Select
       </button>
@@ -144,7 +187,7 @@ export default function Toolbar({
           </button>
           {showConnectorSourceHint && (
             <span
-              className="absolute left-0 top-full mt-1 px-2 py-1 text-xs font-medium text-slate-700 bg-white border border-gray-200 rounded-md shadow-sm whitespace-nowrap z-50"
+              className="absolute left-0 top-full mt-1 px-2 py-1 text-xs font-medium text-white/80 bg-slate-800/90 backdrop-blur-md border border-white/10 rounded-lg shadow-lg whitespace-nowrap z-50"
               role="status"
               aria-live="polite"
             >
@@ -156,17 +199,17 @@ export default function Toolbar({
       {/* Connector style picker: Arrow | Line | Dashed (when Connector tool active or a connector is selected) */}
       {(activeTool === 'connector' || selectedObject?.type === 'connector') && (
         <div className="flex items-center gap-1">
-          <span className="text-xs text-gray-500">Style:</span>
+          <span className="text-xs text-white/50">Style:</span>
           {CONNECTOR_STYLES.map(({ value, label }) => (
             <button
               key={value}
               type="button"
               onClick={() => onConnectorStyleChange(value)}
               aria-label={`Connector style: ${label}`}
-              className={`px-2 py-1 text-xs rounded border transition-colors focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 focus:outline-none ${
+              className={`px-2 py-1 text-xs rounded-lg border-2 transition-all duration-200 focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-1 focus:outline-none ${
                 connectorStyle === value
-                  ? 'bg-blue-100 border-blue-300 text-blue-800 font-medium'
-                  : 'bg-gray-100 border-gray-200 text-gray-700 hover:bg-gray-200'
+                  ? 'bg-blue-500/20 border-blue-400 text-blue-300 font-medium ring-2 ring-blue-400/40'
+                  : 'bg-white/[0.06] border-white/10 text-white/70 hover:bg-white/[0.14] hover:border-white/20'
               }`}
             >
               {label}
@@ -176,12 +219,12 @@ export default function Toolbar({
       )}
 
       {/* Separator */}
-      <div className="h-6 w-px bg-gray-200" />
+      <div className="h-6 w-px bg-white/[0.12]" />
 
       {/* Selection actions */}
       {hasSelection && (
         <div className="flex items-center gap-1.5">
-          <span className="text-xs text-gray-400 mr-1">
+          <span className="text-xs text-white/45 mr-1">
             {selectedIds.length > 1 ? `${selectedIds.length} selected` : ''}
           </span>
           <button
@@ -189,7 +232,7 @@ export default function Toolbar({
             onClick={onDuplicate}
             title="Duplicate (Ctrl+D)"
             aria-label="Duplicate selected"
-            className="px-3 py-1.5 text-sm rounded-md border border-gray-200 bg-gray-100 hover:bg-gray-200 cursor-pointer focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 focus:outline-none"
+            className="px-3 py-1.5 text-sm rounded-lg border border-white/10 bg-white/[0.06] text-white/80 hover:bg-white/[0.14] cursor-pointer focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-1 focus:outline-none transition-all duration-200"
           >
             Copy
           </button>
@@ -198,9 +241,34 @@ export default function Toolbar({
             onClick={onDelete}
             title="Delete (Del)"
             aria-label="Delete selected"
-            className="px-3 py-1.5 text-sm rounded-md border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 cursor-pointer focus-visible:ring-2 focus-visible:ring-red-400 focus-visible:ring-offset-1 focus:outline-none"
+            className="px-3 py-1.5 text-sm rounded-lg border border-red-400/30 bg-red-500/15 text-red-300 hover:bg-red-500/25 cursor-pointer focus-visible:ring-2 focus-visible:ring-red-400 focus-visible:ring-offset-1 focus:outline-none transition-all duration-200"
           >
             Delete
+          </button>
+          <div className="h-4 w-px bg-white/[0.12] mx-0.5" />
+          <button
+            type="button"
+            onClick={onBringToFront}
+            title="Bring to Front"
+            aria-label="Bring to front"
+            className="flex items-center gap-1 px-2.5 py-1.5 text-sm rounded-lg border border-white/10 bg-white/[0.06] text-white/80 hover:bg-white/[0.14] cursor-pointer focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-1 focus:outline-none transition-all duration-200"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M12 4l-4 4h3v8h2V8h3l-4-4z" />
+            </svg>
+            Front
+          </button>
+          <button
+            type="button"
+            onClick={onSendToBack}
+            title="Send to Back"
+            aria-label="Send to back"
+            className="flex items-center gap-1 px-2.5 py-1.5 text-sm rounded-lg border border-white/10 bg-white/[0.06] text-white/80 hover:bg-white/[0.14] cursor-pointer focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-1 focus:outline-none transition-all duration-200"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M12 20l4-4h-3V8h-2v8H8l4 4z" />
+            </svg>
+            Back
           </button>
         </div>
       )}
@@ -208,14 +276,14 @@ export default function Toolbar({
       {/* Color picker */}
       {selectedColorableId && (
         <div className="flex items-center gap-1.5">
-          <span className="text-xs text-gray-500">Color:</span>
+          <span className="text-xs text-white/50">Color:</span>
           {COLORS.map((color) => (
             <button
               key={color}
               type="button"
               onClick={() => onColorChange(color)}
               aria-label={`Set color ${color}`}
-              className="w-6 h-6 rounded border-2 border-gray-400 cursor-pointer hover:opacity-90 transition-opacity focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 focus:outline-none"
+              className="w-6 h-6 rounded-lg border-2 border-white/40 cursor-pointer hover:opacity-90 transition-all duration-200 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 focus:outline-none"
               style={{ background: color }}
             />
           ))}
@@ -225,7 +293,7 @@ export default function Toolbar({
       {/* Size controls (single selection only) */}
       {isResizable && selectedObject && selectedIds.length === 1 && (
         <div className="flex items-center gap-1.5">
-          <span className="text-xs text-gray-500">{isCircle ? 'Size:' : 'W × H:'}</span>
+          <span className="text-xs text-white/50">{isCircle ? 'Size:' : 'W × H:'}</span>
           <input
             type="number"
             min={MIN_SIZE}
@@ -237,7 +305,7 @@ export default function Toolbar({
             onBlur={commitWidth}
             onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
             onPointerDown={(e) => e.stopPropagation()}
-            className="w-14 px-1.5 py-1 text-sm border border-gray-200 rounded focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 focus:outline-none"
+            className="w-14 px-1.5 py-1 text-sm border border-white/10 bg-white/[0.08] text-white rounded-lg focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-1 focus:outline-none"
           />
           {!isCircle && (
             <input
@@ -251,7 +319,7 @@ export default function Toolbar({
               onBlur={commitHeight}
               onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
               onPointerDown={(e) => e.stopPropagation()}
-              className="w-14 px-1.5 py-1 text-sm border border-gray-200 rounded focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 focus:outline-none"
+              className="w-14 px-1.5 py-1 text-sm border border-white/10 bg-white/[0.08] text-white rounded-lg focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-1 focus:outline-none"
             />
           )}
         </div>

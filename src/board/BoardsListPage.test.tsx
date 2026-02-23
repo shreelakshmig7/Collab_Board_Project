@@ -87,7 +87,7 @@ describe('BoardsListPage', () => {
     expect(screen.getByText(/No shared boards/)).toBeInTheDocument()
   })
 
-  it('My Boards list has checkboxes; Rename disabled until one selected, Delete disabled until one or more selected', async () => {
+  it('My Boards cards show per-card action menu', async () => {
     vi.mocked(boards.listBoards).mockResolvedValue([myBoard])
     render(
       <MemoryRouter>
@@ -95,16 +95,10 @@ describe('BoardsListPage', () => {
       </MemoryRouter>
     )
     await waitFor(() => expect(boards.listBoards).toHaveBeenCalled())
-    const renameBtn = screen.getByRole('button', { name: /rename/i })
-    const deleteBtn = screen.getByRole('button', { name: /delete/i })
-    expect(renameBtn).toBeDisabled()
-    expect(deleteBtn).toBeDisabled()
-    const checkbox = screen.getByRole('checkbox', { name: /Select My Board/i })
-    await userEvent.click(checkbox)
-    await waitFor(() => {
-      expect(renameBtn).not.toBeDisabled()
-      expect(deleteBtn).not.toBeDisabled()
-    })
+    const menuBtn = screen.getByRole('button', { name: /open actions for my board/i })
+    await userEvent.click(menuBtn)
+    expect(screen.getByRole('button', { name: /^rename$/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^delete$/i })).toBeInTheDocument()
   })
 
   it('clicking board name navigates to board', async () => {
@@ -129,9 +123,9 @@ describe('BoardsListPage', () => {
       </MemoryRouter>
     )
     await waitFor(() => expect(boards.listBoards).toHaveBeenCalled())
-    const checkbox = screen.getByRole('checkbox', { name: /Select My Board/i })
-    await userEvent.click(checkbox)
-    const deleteBtn = screen.getByRole('button', { name: /delete selected boards/i })
+    const menuBtn = screen.getByRole('button', { name: /open actions for my board/i })
+    await userEvent.click(menuBtn)
+    const deleteBtn = screen.getByRole('button', { name: /^delete$/i })
     await userEvent.click(deleteBtn)
     await waitFor(() => {
       expect(screen.getByRole('dialog')).toBeInTheDocument()
@@ -148,9 +142,9 @@ describe('BoardsListPage', () => {
       </MemoryRouter>
     )
     await waitFor(() => expect(boards.listBoards).toHaveBeenCalled())
-    const checkbox = screen.getByRole('checkbox', { name: /Select My Board/i })
-    await userEvent.click(checkbox)
-    const renameBtn = screen.getByRole('button', { name: /rename/i })
+    const menuBtn = screen.getByRole('button', { name: /open actions for my board/i })
+    await userEvent.click(menuBtn)
+    const renameBtn = screen.getByRole('button', { name: /^rename$/i })
     await userEvent.click(renameBtn)
     await waitFor(() => {
       expect(screen.getByRole('dialog')).toBeInTheDocument()

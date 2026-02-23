@@ -21,7 +21,7 @@
 | **Edge Function** | `supabase/functions/ai-command/index.ts`: Validates JWT, reads `userMessage`, `currentObjects`, `boardId`; calls `getPolicyForMessage(userMessage)` from `policy.ts`; builds tool list; single model per request (Haiku or Sonnet); runs Claude loop with sequential tool execution; compound tool handlers execute all Supabase inserts server-side; returns `{ text }` or error. |
 | **Edge policy** | `supabase/functions/ai-command/policy.ts`: `getPolicyForMessage(userMessage)` → `AiPolicy`: `modelTier` ('fast'\|'smart'), `maxTurns`, `maxTokens`, `allowGetBoardState`, `forcedToolName`, `returnAfterToolExecution`. Three tiers: simple creation → fast/Haiku; compound templates → smart/Sonnet, 1 turn, forced tool; ops/complex → smart/Sonnet, 3–8 turns, getBoardState allowed. |
 
-**Tools (edge):** `getBoardState`, `createStickyNote`, `createShape`, `createFrame`, `createConnector`, `createText`, `moveObject`, `resizeObject`, `rotateObject`, `updateText`, `changeColor`, `deleteObject`, `arrangeInGrid`, **`createQuadrant`**, **`createColumnLayout`**, **`clearBoard`**, **`createBulkObjects`**.
+**Tools (edge):** `getBoardState`, `createStickyNote`, `createShape`, `createFrame`, `createConnector`, `createText`, `moveObject`, `resizeObject`, `rotateObject`, `updateText`, `changeColor`, `deleteObject`, `arrangeInGrid`, **`createQuadrant`**, **`createColumnLayout`**, **`clearBoard`**, **`createBulkObjects`**, **`createFlowchart`**, **`batchModify`**.
 
 **Models:** Simple path → `claude-haiku-4-5-20251001` (env `ANTHROPIC_MODEL_SIMPLE`); compound + complex path → `claude-sonnet-4-20250514` (env `ANTHROPIC_MODEL_COMPLEX`).
 
@@ -146,6 +146,81 @@
 - **Problem:** Commands like "space elements evenly" weren't sending `currentObjects` to the edge function because "space" wasn't in the client's `isComplexCommand` regex. Claude received `"Current board state: []"` and concluded the board was empty.
 - **Fix:** Added `space|align|distribute|kanban` to `isComplexCommand`; broadened `isObjectRefCommand` to capture `resize|rotate|rename|change|update|color`. Both ensure the full board state is included in the request for any command that needs to operate on existing objects.
 
+### 3.15 `createFlowchart` compound tool (shipped)
+
+- **Problem:** Asking "Create a flowchart for user onboarding" routed to the generic complex path — multiple Claude turns, slow, and produced inconsistent results. Flowcharts have a predictable vertical-stack structure: one LLM call to decide the steps, then server-side layout.
+- **Approach:** New `createFlowchart` compound tool. Claude provides a `title` and `steps` array (each with `label` and optional `type`: `start` | `process` | `decision` | `end`). Edge function computes all positions and batch-inserts: one outer `frame`, N colored `rect` nodes inside it, and N-1 `connector` objects linking consecutive nodes.
+- **Node color encoding:** `start` → green (`#86efac`), `process` → blue (`#93c5fd`), `decision` → yellow (`#fde68a`), `end` → red (`#fca5a5`). Node type defaults: first step → `start`, last step → `end`, all others → `process`.
+- **Detection regex:** `FLOWCHART_RE = /\b(flowchart|flow[\s-]chart|flow[\s-]diagram|process[\s-]flow)\b/i` — covers "flowchart", "flow chart", "flow diagram", "process flow".
+- **Policy:** Sonnet, 1 turn, no `getBoardState`, `returnAfterToolExecution: true`. Checked before the generic complex path in both `policy.ts` and `aiCommandPolicy.ts`.
+- **Result:** Flowchart for 6 steps completes in ~2–3s (same tier as SWOT/retro). All nodes and connectors appear simultaneously via Supabase Realtime.
+
+### 3.16 `batchModify` tool for bulk mutations (shipped)
+
+- **Problem:** Commands like "move all pink stickies to the left" or "delete all blue rectangles" required Claude to loop `moveObject` / `deleteObject` individually — one LLM tool call + one DB write per object, causing both latency and `maxTurns` exhaustion for boards with many matching objects.
+- **Approach:** New `batchModify` tool. Accepts `objectIds` (array), `action` (`update` | `delete`), and an `updates` map. For `delete`: single `supabase.from(TABLE).delete().in('id', ids)` — one DB round-trip regardless of N. For `update`: single `supabase.from(TABLE).update(fields).in('id', ids)`.
+- **Usage pattern:** Claude first calls `getBoardState` to collect matching IDs, then calls `batchModify` once. Tool description explicitly instructs "Never loop individual move/delete/changeColor calls for batch operations."
+- **Placement cache sync:** After a `batchModify delete`, the `placementObjects` array is updated in-memory to remove deleted IDs so subsequent placement calls in the same request remain accurate.
+- **Result:** "Delete all blue rectangles" (50 objects) — one `getBoardState` call + one `batchModify delete` call vs. 50 individual `deleteObject` calls. All deletions reflected atomically via Realtime.
+
+### 3.17 Server-side placement engine — `placement.ts` (shipped)
+
+- **Problem:** Objects created by AI commands were placed at fixed coordinates (e.g. `x: 100, y: 100`) regardless of what was already on the board — new stickies appeared on top of existing content.
+- **Approach:** New `supabase/functions/ai-command/placement.ts` module with pure placement math:
+  - `resolvePlacement(candidate, objects, viewport)` — single-object placement: returns candidate position if clear; tries center of viewport, right-third, bottom-third; falls back to 12px grid scan; finally places outside the existing cluster.
+  - `resolveBulkPlacement(startX, startY, layoutW, layoutH, objects, viewport)` — layout-box placement for compound tools: same strategy but operates on the full bounding box of a template, so the whole SWOT / retro / flowchart lands without overlap.
+  - `doesRectOverlapAny` — AABB overlap check with configurable padding.
+  - `findEmptyPositionOutsideCluster` — fallback that places to the right of the existing cluster bounding box.
+- **Integration:** All creation tools (`createStickyNote`, `createShape`, `createFrame`, `createText`, `createConnector`, `createBulkObjects`, `createQuadrant`, `createColumnLayout`, `createFlowchart`) now call `resolvePlacement` or `resolveBulkPlacement` before inserting. The `placementObjects` array is updated after each tool execution so subsequent tools in the same multi-turn request don't overlap each other either.
+- **Lazy DB load:** If `placementObjects` is empty when a placement-aware tool runs, the edge function fetches the board's bounding boxes from Supabase (`id,x,y,width,height`, capped at 200 rows) rather than requiring the client to send them in every request.
+
+### 3.18 Viewport bounds pass-through + `createdCenter` response (shipped)
+
+- **Viewport bounds:** Client (`claudeAgent.ts`) now includes `viewport.bounds` (`x, y, width, height`) in the request body when provided. `runAICommand` accepts a fourth optional `viewport` argument. Edge function uses `viewportBounds` as the first candidate region in `resolvePlacement` / `resolveBulkPlacement`, so new objects land inside the user's visible area when possible.
+- **`createdCenter` in response:** Edge function now returns `createdCenter: { x, y }` — the center point of the created object or template — alongside `text`. `RunAIResult` type extended to include `createdCenter?: { x, y }`. The canvas (`BoardPage.tsx`) can use this to pan/zoom to the newly created content so users don't have to hunt for what the AI just made.
+- **Implementation detail:** `lastCreatedCenter` is tracked across tool turns; all creation tool helpers return `{ content, createdCenter }` alongside their result string. Final response (both `returnAfterToolExecution` and multi-turn) includes the last non-null `createdCenter`.
+
+### 3.19 Selective session refresh — avoid redundant Auth round-trips (shipped)
+
+- **Problem:** `runAICommand` called `supabase.auth.refreshSession()` unconditionally before every AI command. A session token is valid for 3600s; forcing a refresh on every command added ~100–200ms of Auth latency and an unnecessary network round-trip.
+- **Fix:** Check `session.expires_at` before deciding to refresh. If the token expires more than 60 seconds from now, reuse it directly. Only call `refreshSession()` when the token is close to expiry or missing. A 401 retry loop (already present) handles the edge case where the token expires mid-flight.
+- **Result:** Typically saves one Auth network call per AI command. On simple creation commands (~1.5–2s total) this is a measurable fraction of the round-trip.
+
+### 3.20 `boardStateForPlacementOnly` flag — reduce prompt tokens for creation (shipped)
+
+- **Problem:** Simple creation commands (e.g. "Add a blue sticky note") were sending the full `currentObjects` array in the Claude prompt, even though Claude only needs `x/y` for placement — it doesn't need to know about existing objects to create a single new one. For boards with hundreds of objects this added significant input tokens and latency.
+- **Fix:** Added `boardStateForPlacementOnly: true` flag in the request body for two paths:
+  1. `isSimpleCreation` — single-object creation commands.
+  2. `isBulkCreation` — bulk creation commands.
+  When true, the edge function uses `currentObjects` only for `placementObjects` (overlap avoidance), but sets `objectsForPrompt = []` so the Claude prompt receives `"Current board state: []"`. The full board state never enters the Anthropic API call.
+- **Result:** Simple creation commands on large boards: prompt tokens drop from ~10k+ to ~400 (just the system prompt + user message). No correctness regression — placement still avoids overlap, and forced tool names mean Claude doesn't need board context to decide which tool to call.
+
+### 3.21 Compound tool batch inserts — eliminate sequential awaits (shipped)
+
+- **Problem:** `executeCreateQuadrant` and `executeCreateColumnLayout` called `await supabase.from(TABLE).insert(...)` once per element (outer frame + inner frames + stickies) — up to 13 sequential DB round-trips for a SWOT template. Each await added ~30–80ms.
+- **Fix:** Refactored all compound tools (`createQuadrant`, `createColumnLayout`, `createFlowchart`) to collect all row objects into a local `rows[]` array first, then execute a single `supabase.from(TABLE).insert(rows)` at the end. The `placementAdds` array accumulates bounding boxes for the placement engine so relative positioning inside the compound layout remains correct.
+- **Result:** SWOT template: 13 DB writes → 1 batch insert. Column layout with 3 columns + 9 stickies: 13 DB writes → 1 batch insert. Reduces per-template server time by ~400–800ms.
+
+### 3.22 Creation grid path — new policy tier (shipped)
+
+- **Problem:** "Create a 2×3 grid of sticky notes for pros and cons" had no matching tier. It contains `CREATION_RE` + `\bgrid\b`, so it fell into the generic complex path (Sonnet, 8 turns, `getBoardState` allowed) — overkill for a structured creation request that doesn't need to inspect existing objects.
+- **Fix:** New `isCreationGrid` tier: `CREATION_RE.test(msg) && /\bgrid\b/i.test(msg)`. Returns Sonnet, **2 turns**, no `getBoardState`, `returnAfterToolExecution: true`. Two turns (rather than 1) lets Claude optionally call a creation tool and then a placement tool if needed, without the overhead of 8 turns.
+- **Distinction from "arrange in a grid":** "Arrange the objects in a grid" contains `\bgrid\b` but not `CREATION_RE`, so it falls through to `looksComplex` (which tests `ARRANGE_RE`) and gets the full ops/complex path with `getBoardState`.
+- **Tests added:** 3 new test cases in both `aiCommandPolicy.test.ts` and `aiEdgePolicy.test.ts` asserting the correct tier for creation-grid commands and confirming the non-creation "arrange" variant is not misclassified.
+
+### 3.23 Ops path `returnAfterToolExecution: true` (shipped)
+
+- **Previous behavior:** Ops path (`move`, `resize`, `change color`, etc.) had `returnAfterToolExecution: false` — after Claude executed the mutation tool, a final Claude turn was triggered to narrate the result (e.g. "I've moved the sticky note to (200, 300)."). This added a full Anthropic API round-trip (~1–2s) just for narration text the user doesn't need.
+- **Fix:** Changed ops policy to `returnAfterToolExecution: true`. The edge function now returns immediately after the mutation tools execute, using `getFriendlySummary` to produce clean text (e.g. "Moved"). The narration turn is eliminated.
+- **Edge case handled:** The `returnAfterToolExecution` early-exit guard already checks `executedOnlyLookups` — if Claude calls `getBoardState` first, the loop continues (doesn't exit early on a lookup-only turn). This means the flow is: `getBoardState` → continue → mutation tool → exit with friendly summary.
+- **Result:** Ops commands (e.g. "Move the sticky note right") drop from ~4–5s to ~3–4s by eliminating the narration turn.
+
+### 3.24 `CLEAR_RE` narrowing — prevent false positives (shipped)
+
+- **Problem:** The previous `CLEAR_RE` included `\breset\b` as a bare word. This matched "reset my password", "reset the selection", or any other "reset X" phrase, incorrectly routing those commands to `clearBoard` (which deletes all board objects).
+- **Fix:** Removed bare `\breset\b`. Replaced with `\breset\s+(?:the\s+)?(?:board|canvas)\b` — requires "reset" to be immediately followed by "board" or "canvas" (with optional "the"). "Clear the board", "wipe the board", "start fresh", "delete all", "erase all" patterns are unaffected.
+- **Both files updated in sync:** `policy.ts` (edge) and `aiCommandPolicy.ts` (client mirror) — the fix was applied identically to both.
+
 ---
 
 ## 4. Current behavior summary
@@ -154,17 +229,19 @@
 |--------------|-------|--------|----------------|--------------------|-----------------|
 | Simple (add 1 sticky, shape, frame, text) | Haiku | 1 | No | Yes | ~1.5–2s |
 | **Bulk (create N objects of same type, N ≥ 3)** | **Haiku** | **1** | **No** | **Yes** | **~1.3–2.5s** |
-| Compound (SWOT, retro, journey map, kanban, clear board) | Sonnet | 1 | No | Yes | ~2–3s |
-| Ops (move, resize, change color, delete specific, rotate) | Sonnet | 3 | Yes | No | ~3–5s |
+| Compound (SWOT, retro, journey map, kanban, flowchart, clear board) | Sonnet | 1 | No | Yes | ~2–3s |
+| **Creation grid (create a NxM grid of objects)** | **Sonnet** | **2** | **No** | **Yes** | **~2–4s** |
+| Ops (move, resize, change color, delete specific, rotate) | Sonnet | 3 | Yes | **Yes** | ~3–4s |
 | Query (how many, list, describe, count) | Sonnet | 8 | Yes | No | ~4–6s |
-| Generic complex (arrange, connect, multi-step) | Sonnet | 8 | Yes | No | ~5–10s |
+| Generic complex (arrange, connect, batch modify, multi-step) | Sonnet | 8 | Yes | No | ~5–10s |
 
-- **Simple:** Haiku, single-turn, no board state, return immediately after tool. Target &lt;2s met.
+- **Simple:** Haiku, single-turn, `boardStateForPlacementOnly` strips board state from Claude prompt (retains it for server-side placement), return immediately after tool. Target &lt;2s met. Placement engine prevents overlap with existing objects.
 - **Bulk:** Haiku forced to `createBulkObjects`; all N objects computed and batch-inserted server-side in one DB call. ~2,390 input tokens regardless of N. Tested to 500 objects in 1.50s.
-- **Compound:** Sonnet forced to one compound tool; all DB operations done server-side. ~2–3s regardless of template complexity.
-- **Ops:** Sonnet with board state access; 3-turn cap prevents over-running on simple mutations.
+- **Compound:** Sonnet forced to one compound tool (`createQuadrant`, `createColumnLayout`, `createFlowchart`, `clearBoard`). All rows batch-inserted in a single Supabase call. `resolveBulkPlacement` places template in visible viewport without overlap. ~2–3s regardless of template complexity.
+- **Creation grid:** Sonnet, 2 turns, no board state. "Create a 2×3 grid of sticky notes" gets a faster path than generic complex.
+- **Ops:** Sonnet with board state access; 3-turn cap; `returnAfterToolExecution: true` — narration turn eliminated, saving ~1–2s. Inline board state sent for small boards (≤25 objects) to skip `getBoardState` round-trip.
 - **Query:** Sonnet with board state; `BOARD_STATE_OBJECT_CAP` truncates to frames-only summary for large boards.
-- **Generic complex:** Full multi-turn for arrange/connect/multi-step; correctness over speed.
+- **Generic complex:** Full multi-turn for arrange/connect/multi-step; `batchModify` available for bulk mutations; correctness over speed.
 
 ---
 
@@ -175,7 +252,7 @@
 | **Cursor (+ Claude Sonnet)** | Primary IDE throughout. Used for all code generation, refactoring, and debugging. Agent mode used for multi-file changes (e.g. policy + index + tests in one session). Plan mode used before large changes (compound tool architecture, ops path reclassification) to reason through implications before touching code. |
 | **Claude (Sonnet via Cursor)** | Generated edge function logic, policy classification, system prompt iterations, compound tool layout math, and all test files. Served as both implementation agent and architecture consultant for the compound tool approach. |
 | **Supabase Edge Functions (Deno)** | AI proxy backend: validated JWT, called Anthropic API, executed all tool handlers (Supabase inserts/updates/deletes). Deployed via `supabase functions deploy`. |
-| **Vitest + Testing Library** | TDD workflow: tests written first for policy classification (`aiEdgePolicy.test.ts`, `aiCommandPolicy.test.ts`), then implementation. 130 tests across 11 files (added `claudeAgent.test.ts` for board-state routing logic); run before every deploy. |
+| **Vitest + Testing Library** | TDD workflow: tests written first for policy classification (`aiEdgePolicy.test.ts`, `aiCommandPolicy.test.ts`), then implementation. Tests added for `claudeAgent.ts` routing logic (`claudeAgent.test.ts` — 34 cases for `isBulkCreation`, `isQueryCommand`, ops inline threshold) and all new policy tiers (flowchart, creation grid, bulk). Run before every deploy. |
 | **Supabase Realtime** | All board object changes (AI-generated or user-made) sync instantly to all connected clients via Postgres row subscriptions — no extra broadcasting code needed. |
 
 **Workflow pattern:** Every significant change followed: plan → write failing tests → implement → green tests → deploy edge function → live test in browser.
@@ -266,9 +343,14 @@ These are prompts used **during development** (in Cursor) that produced the most
 - **TDD as a forcing function:** Writing tests before implementation forced explicit reasoning about every policy case and field value. Tests also caught regressions when policy tiers were reorganized — without them, the ops reclassification would have silently broken existing behavior.
 - **Rate limits are throughput caps, not spend caps:** The 30k input-token-per-minute limit is hit not by one expensive call but by many cheap retries. The root fix is ensuring the correct number of objects is created on the first call — eliminating retries eliminates the token pileup.
 - **Batch insert is mandatory for bulk operations:** Sequential `await insert()` in a loop would have timed out the Edge Function at ~100+ objects (10s limit). A single `insert([...rows])` handles 500 objects in the same time as 1 insert, making the operation latency-independent of object count.
-- **Scope board state stripping precisely:** Stripping `currentObjects` for all creation commands would break "create a sticky next to the blue frame" (needs board state). The `isBulkCreation` flag gates the strip to only the bulk path — every other creation path is untouched.
+- **Scope board state stripping precisely:** Stripping `currentObjects` for all creation commands would break "create a sticky next to the blue frame" (needs board state). The `isBulkCreation` and `isSimpleCreation` flags gate the strip (`boardStateForPlacementOnly`) to only the paths that don't need board context in the Claude prompt — every contextual creation path is untouched.
 - **Deploy is a hidden step:** Client-side changes (TypeScript, policy mirrors) are immediately live in the browser. Edge Function changes require an explicit `supabase functions deploy` — forgetting this causes confusion where old server behavior persists despite correct-looking local code.
 - **Regex plural handling matters:** `\brectangle\b` does not match "rectangles" — the word boundary fails because `s` follows. Using `rectangles?` (or explicit plural variants) is required for object-type regexes to work on natural language input.
+- **Placement must be server-side:** Client cannot compute non-overlapping positions because it only knows the current snapshot; the edge function owns all ongoing inserts. `placement.ts` on the server resolves all positions after collecting `currentObjects` and updating `placementObjects` in-memory across tool calls in the same request.
+- **Viewport bounds unlock placement quality:** Passing `viewport.bounds` from the client lets the placement engine try to land new content in the visible area first — without it, all placement falls back to "outside existing cluster" which may be off-screen. The viewport argument is optional; placement degrades gracefully without it.
+- **`returnAfterToolExecution` on ops saves a full LLM turn:** The narration turn ("I've moved the sticky note to...") adds ~1–2s with no user value. Switching ops to `returnAfterToolExecution: true` + `getFriendlySummary` gives clean text in the same time as tool execution.
+- **Batch inserts in compound tools are essential for correctness, not just performance:** Sequential `await insert()` calls for a SWOT template (13 inserts) can race against Supabase Realtime — clients may receive partial state mid-insert. A single batch insert is atomic from Realtime's perspective: all elements appear simultaneously.
+- **Narrowing keyword regexes prevents accidental destructive actions:** Bare `\breset\b` in `CLEAR_RE` matched "reset my password" and wiped the board. Always scope destructive-action keywords to board-specific context (e.g. `reset\s+(?:the\s+)?(?:board|canvas)`).
 
 ---
 
